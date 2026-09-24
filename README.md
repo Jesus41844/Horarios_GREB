@@ -117,6 +117,3 @@ Al abrir la web por primera vez, cuando la base todavía no tiene ninguna cuenta
 aparece una pantalla para crear la tuya: crea las tablas si faltan y te deja como
 superadmin. **Se cierra sola** en cuanto existe una cuenta, y a partir de ahí las
 demás se crean desde Ajustes → Miembros.
-
-Esto evita depender del puerto de Postgres desde tu máquina: el servidor sí alcanza
-la base aunque tu red bloquee el 5432/6543.

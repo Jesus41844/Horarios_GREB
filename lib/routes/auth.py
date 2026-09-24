@@ -69,7 +69,10 @@ def login(body: LoginIn, request: Request, response: Response, c: Conn = Depends
 @router.get("/groups")
 def public_groups(c: Conn = Depends(get_conn)):
     """Lista para el formulario de registro: solo nombres, sin datos de nadie."""
-    return repo.list_public_groups(c)
+    try:
+        return repo.list_public_groups(c)
+    except Exception:
+        return []  # antes del alta inicial las tablas todavía no existen
 
 
 @router.post("/register")

@@ -1,0 +1,335 @@
+/* Horarios — taller/laboratorio: papel frío, tinta verde-negra, acento teal.
+   El ámbar queda reservado para los huecos libres: es el dato que se busca. */
+
+:root {
+  --paper: #f4f7f6;
+  --card: #ffffff;
+  --ink: #111a19;
+  --muted: #556664;
+  --line: #dbe4e1;
+  --line-soft: #eaf0ee;
+  --accent: #0b6157;
+  --accent-ink: #ffffff;
+  --accent-soft: #dceae7;
+  --free: #91560a;
+  --free-soft: #fbf0dc;
+  --bad: #9e2c1c;
+  --bad-soft: #fbe9e6;
+  --ok: #1c6b3f;
+  --hit: #fbe6a2;
+  --shadow: 0 1px 2px rgba(17, 26, 25, .05), 0 8px 24px -12px rgba(17, 26, 25, .18);
+  --radius: 10px;
+  --display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --mono: "DM Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0c1413;
+    --card: #131d1b;
+    --ink: #e2ebe8;
+    --muted: #8ba09c;
+    --line: #253330;
+    --line-soft: #1b2624;
+    --accent: #4ed0bc;
+    --accent-ink: #06201c;
+    --accent-soft: #15302c;
+    --free: #e3a848;
+    --free-soft: #2c2312;
+    --bad: #ff9d90;
+    --bad-soft: #351915;
+    --ok: #5fc98c;
+    --hit: #57470f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .7);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.5 var(--body);
+  /* Rejilla de papel milimetrado, muy tenue: el fondo de un cuaderno de taller. */
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size: 64px 64px, 64px 64px;
+}
+
+h1, h2, h3 { font-family: var(--display); font-weight: 700; letter-spacing: -.015em; margin: 0; }
+
+button, input, select { font: inherit; color: inherit; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* --- controles ---------------------------------------------------------- */
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  font-size: 14px; font-weight: 500; white-space: nowrap;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent); color: var(--accent-ink); filter: brightness(1.08); }
+.btn-danger:hover { border-color: var(--bad); color: var(--bad); }
+.btn[disabled] { opacity: .5; cursor: progress; }
+
+.field { display: block; margin-bottom: 12px; }
+.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.field input, .field select {
+  width: 100%; padding: 9px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card);
+}
+
+/* --- entrar ------------------------------------------------------------- */
+
+.login { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
+.login-card {
+  width: min(380px, 100%); background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: var(--shadow); padding: 28px;
+}
+.login-card h1 { font-size: 26px; font-weight: 800; }
+.login-card .lede { color: var(--muted); font-size: 14px; margin: 4px 0 20px; }
+.login-card .btn { width: 100%; justify-content: center; margin-top: 4px; }
+
+/* --- cabecera ----------------------------------------------------------- */
+
+.top {
+  position: sticky; top: 0; z-index: 3;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.top-in {
+  max-width: 1080px; margin: 0 auto; padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.brand { font-family: var(--display); font-weight: 800; font-size: 17px; letter-spacing: -.02em; }
+.brand span { color: var(--accent); }
+.top select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); }
+.top .search { flex: 1 1 200px; min-width: 160px; max-width: 340px; }
+.top .search input {
+  width: 100%; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card);
+}
+.spacer { flex: 1 1 auto; }
+
+/* --- estructura --------------------------------------------------------- */
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px 80px; }
+
+.days { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 18px; }
+.days button {
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  padding: 7px 14px; border-radius: 999px; cursor: pointer; font-size: 14px; white-space: nowrap;
+}
+.days button[aria-selected="true"] {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600;
+}
+.days button .n { font-family: var(--mono); font-size: 12px; opacity: .75; margin-left: 6px; }
+
+/* --- pista del día (elemento firma) ------------------------------------- */
+
+.track {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px 10px; margin-bottom: 22px; box-shadow: var(--shadow);
+}
+.track-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  margin-bottom: 10px; flex-wrap: wrap;
+}
+.track-head h2 { font-size: 15px; }
+.track-head .legend { font-size: 12px; color: var(--muted); display: flex; gap: 12px; }
+.track-head .legend i { font-style: normal; display: inline-flex; align-items: center; gap: 5px; }
+.track-head .legend i::before {
+  content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--accent);
+}
+.track-head .legend .free::before { background: var(--free); }
+
+.rule { position: relative; height: 16px; border-bottom: 1px solid var(--line); }
+.rule .tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line-soft); }
+.rule .tick b {
+  position: absolute; left: 3px; top: 0; font: 500 11px/1 var(--mono);
+  color: var(--muted); letter-spacing: -.02em;
+}
+/* La última marca cae en el borde: su etiqueta se alinea hacia dentro. */
+.rule .tick.last b { left: auto; right: 3px; }
+
+/* Dos carriles: arriba las etiquetas de los huecos, abajo las barras. Así el
+   texto de un hueco estrecho puede sobresalir sin taparlas. */
+.bars { position: relative; height: 62px; margin-top: 6px; }
+.bar {
+  /* La altura (en línea, según cuánta gente) codifica la ocupación. */
+  position: absolute; bottom: 6px; border-radius: 5px;
+  background: var(--accent); border: 0; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  animation: grow .34s cubic-bezier(.2, .8, .3, 1) backwards;
+}
+.bar b { font: 500 11px/1 var(--mono); color: var(--accent-ink); }
+.bar:hover { filter: brightness(1.12); }
+.gap {
+  position: absolute; top: 0; height: 14px;
+  border-bottom: 2px dotted var(--free); display: grid; place-items: center;
+}
+.gap b {
+  font: 500 10px/1 var(--mono); color: var(--free); background: var(--free-soft);
+  padding: 2px 5px; border-radius: 4px; white-space: nowrap;
+}
+.now { position: absolute; top: -18px; bottom: 0; width: 2px; background: var(--bad); }
+.now::after {
+  content: "ahora"; position: absolute; top: -4px; left: 4px;
+  font: 500 10px/1 var(--mono); color: var(--bad);
+}
+
+@keyframes grow { from { transform: scaleX(.2); opacity: 0; transform-origin: left; } }
+
+/* --- tramos ------------------------------------------------------------- */
+
+.seg {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 16px; margin-bottom: 8px;
+  display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: start;
+  animation: rise .28s ease backwards;
+}
+.seg.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.seg .when { font: 500 14px/1.35 var(--mono); letter-spacing: -.03em; white-space: nowrap; }
+.seg .count { display: block; font-size: 12px; color: var(--muted); font-family: var(--body); margin-top: 2px; }
+.who { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(5px); } }
+
+.chip {
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+  padding: 4px 11px; border-radius: 999px; cursor: pointer; font-size: 14px;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.chip:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chip mark { background: var(--hit); color: inherit; border-radius: 3px; padding: 0 1px; }
+
+.day-title { font-size: 15px; margin: 22px 0 8px; }
+.day-title:first-child { margin-top: 0; }
+
+.empty {
+  text-align: center; color: var(--muted); padding: 48px 20px;
+  border: 1px dashed var(--line); border-radius: var(--radius); background: var(--card);
+}
+.empty strong { display: block; font-family: var(--display); font-size: 17px; color: var(--ink); margin-bottom: 6px; }
+
+/* --- subida ------------------------------------------------------------- */
+
+.drop {
+  display: block; border: 2px dashed var(--line); border-radius: var(--radius);
+  background: var(--card); padding: 14px; text-align: center; color: var(--muted);
+  cursor: pointer; margin-bottom: 14px; font-size: 14px;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.drop:hover, .drop.over, .drop:focus-within {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--ink);
+}
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.report {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 16px; margin-bottom: 14px;
+}
+.report h2 { font-size: 14px; margin-bottom: 8px; }
+.report ul { margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.report li { padding: 4px 0; border-top: 1px solid var(--line-soft); }
+.report li:first-child { border-top: 0; }
+.report .f { font-family: var(--mono); font-size: 13px; }
+.report .good .f { color: var(--ok); }
+.report .fail { background: var(--bad-soft); margin: 0 -16px; padding: 6px 16px; border-top-color: transparent; }
+.report .fail .f { color: var(--bad); font-weight: 500; }
+.report .why { color: var(--muted); }
+
+/* --- panel lateral y diálogos ------------------------------------------- */
+
+.scrim {
+  position: fixed; inset: 0; background: rgba(6, 14, 13, .42); z-index: 8;
+  opacity: 0; pointer-events: none; transition: opacity .18s;
+}
+.scrim.on { opacity: 1; pointer-events: auto; }
+
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%); z-index: 9;
+  background: var(--card); border-left: 1px solid var(--line); box-shadow: var(--shadow);
+  padding: 22px; overflow-y: auto; transform: translateX(100%); transition: transform .22s ease;
+}
+.panel.on { transform: none; }
+.panel-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; margin-bottom: 4px; }
+.panel-head h2 { font-size: 20px; }
+.panel-head .btn { padding: 4px 10px; }
+.panel .sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+
+.pday { margin-bottom: 18px; }
+.pday h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.pday .ranges { font: 500 14px/1.4 var(--mono); margin: 3px 0 8px; }
+.pday table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.pday td { padding: 5px 8px 5px 0; border-top: 1px solid var(--line-soft); vertical-align: top; }
+.pday td:first-child { white-space: nowrap; font: 400 12px/1.5 var(--mono); color: var(--muted); width: 118px; }
+.pday .room { color: var(--muted); font-size: 13px; }
+.pday .tag {
+  font: 500 11px/1 var(--mono); background: var(--accent-soft); color: var(--accent);
+  padding: 2px 5px; border-radius: 4px; margin-left: 5px;
+}
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tabs button {
+  border: 0; background: none; color: var(--muted); cursor: pointer;
+  padding: 8px 12px; border-bottom: 2px solid transparent; font-size: 14px;
+}
+.tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+.rows { list-style: none; margin: 0 0 16px; padding: 0; }
+.rows li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-top: 1px solid var(--line-soft); font-size: 14px;
+}
+.rows li:first-child { border-top: 0; }
+.rows .who-n { flex: 1 1 auto; min-width: 0; }
+.rows .who-n b { display: block; font-weight: 600; }
+.rows .who-n span { color: var(--muted); font-size: 13px; word-break: break-all; }
+.rows .role { font: 500 11px/1 var(--mono); padding: 3px 7px; border-radius: 999px; background: var(--paper); border: 1px solid var(--line); }
+.rows .role.admin { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+.note { border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-bottom: 12px; }
+.note.err { background: var(--bad-soft); color: var(--bad); }
+.note.ok { background: var(--accent-soft); color: var(--accent); }
+
+.form-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 18px; }
+.form-card h3 { font-size: 14px; margin-bottom: 10px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* --- pantallas estrechas ------------------------------------------------ */
+
+@media (max-width: 620px) {
+  .seg { grid-template-columns: 1fr; gap: 8px; }
+  .track { padding: 12px 12px 8px; }
+  .two { grid-template-columns: 1fr; }
+  .wrap { padding-bottom: 48px; }
+  /* El buscador baja a su propia línea y deja los botones arriba. */
+  .top .search { order: 10; flex-basis: 100%; max-width: none; }
+  .top .spacer { display: none; }
+  .top-in { gap: 8px; }
+  .brand { margin-right: auto; }
+  /* La etiqueta pisaría la hora en pantallas estrechas; la línea basta. */
+  .now::after { display: none; }
+  .track-head { flex-direction: column; align-items: flex-start; gap: 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

@@ -72,8 +72,8 @@ def _parse_cell(cell: str):
 def parse_pdf(path: Path) -> list[Block]:
     try:
         pdf = pdfplumber.open(path)
-    except Exception as e:  # corrupto, cifrado, no es PDF
-        raise ParseError(f"No se pudo abrir el PDF (¿dañado o protegido?): {type(e).__name__}")
+    except Exception:  # corrupto, cifrado, o no es un PDF de verdad
+        raise ParseError("No se pudo abrir el PDF. Puede estar dañado o protegido con contraseña.")
 
     blocks: list[Block] = []
     has_text = False

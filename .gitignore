@@ -4,3 +4,4 @@ data.db
 .env*
 .vercel/
 *.pdf
+.pytest_cache/

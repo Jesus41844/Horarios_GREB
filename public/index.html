@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Horarios GREB</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1c2430; --muted: #667085; --line: #e3e6eb;
+    --accent: #2456d6; --accent-soft: #e6edfd; --ok: #147a3d; --bad: #b42318; --bad-soft: #fdecea;
+    --hit: #fff1b8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c; --card: #1a2029; --text: #e6e9ee; --muted: #98a2b3; --line: #2b3441;
+      --accent: #7aa2ff; --accent-soft: #223255; --ok: #4cc27f; --bad: #ff8a80; --bad-soft: #3a1f1d;
+      --hit: #5a4a10;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  .bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .drop { flex: 1 1 280px; border: 2px dashed var(--line); border-radius: 10px; padding: 12px 14px;
+    background: var(--card); cursor: pointer; text-align: center; color: var(--muted); }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+  .search { flex: 1 1 280px; }
+  .search input { width: 100%; height: 100%; min-height: 48px; padding: 0 14px; font-size: 15px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
+  .search input:focus, .tab:focus-visible, .chip:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px; }
+  .report { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 14px; }
+  .report h2 { font-size: 14px; margin: 0 0 6px; }
+  .report ul { margin: 0; padding: 0; list-style: none; }
+  .report li { padding: 3px 0; }
+  .report .ok { color: var(--ok); }
+  .report .bad { color: var(--bad); font-weight: 600; }
+  .report .bad span { font-weight: 400; color: var(--text); }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tab { border: 1px solid var(--line); background: var(--card); color: var(--text);
+    padding: 7px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .day { margin-bottom: 18px; }
+  .day h2 { font-size: 16px; margin: 0 0 8px; }
+  .seg { display: flex; gap: 14px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; align-items: baseline; }
+  .time { flex: 0 0 150px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .who { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 0; background: var(--accent-soft); color: var(--text); padding: 3px 10px;
+    border-radius: 999px; cursor: pointer; font: inherit; }
+  .chip:hover { background: var(--accent); color: #fff; }
+  mark { background: var(--hit); color: inherit; border-radius: 3px; padding: 0 1px; }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  .people { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .panel { position: fixed; inset: 0 0 0 auto; width: min(440px, 100%); background: var(--card);
+    border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.15); padding: 18px;
+    overflow-y: auto; transform: translateX(100%); transition: transform .2s; z-index: 5; }
+  .panel.open { transform: none; }
+  .panel h2 { margin: 0 0 4px; font-size: 18px; }
+  .panel .actions { display: flex; gap: 8px; margin: 10px 0 14px; }
+  .panel button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); cursor: pointer; }
+  .panel button.danger { color: var(--bad); }
+  .pd h3 { font-size: 14px; margin: 14px 0 4px; }
+  .pd .range { color: var(--muted); font-size: 13px; }
+  .pd table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .pd td { padding: 4px 6px 4px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .pd td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text);
+    padding: 20px; width: min(340px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog input { width: 100%; padding: 10px; margin: 10px 0; font: inherit; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  dialog button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 0;
+    background: var(--accent); color: #fff; cursor: pointer; }
+  .gate-err { color: var(--bad); min-height: 1.2em; margin: 0; font-size: 13px; }
+  @media (max-width: 560px) { .seg { flex-direction: column; gap: 6px; } .time { flex-basis: auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Horarios GREB</h1>
+
+  <div class="bar">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".pdf,application/pdf" multiple hidden>
+      Arrastra los PDF aquí o haz clic para elegirlos
+    </label>
+    <div class="search">
+      <input id="q" type="search" placeholder="Buscar persona por nombre…" autocomplete="off" aria-label="Buscar persona">
+    </div>
+  </div>
+
+  <div id="report" class="report" hidden></div>
+  <div id="people" class="people"></div>
+  <div id="tabs" class="tabs" role="tablist"></div>
+  <div id="main"></div>
+</div>
+
+<dialog id="gate">
+  <form method="dialog" id="gateForm">
+    <strong>Acceso</strong>
+    <input id="gatePw" type="password" placeholder="Clave" autocomplete="current-password" aria-label="Clave">
+    <p class="gate-err" id="gateErr"></p>
+    <button type="submit">Entrar</button>
+  </form>
+</dialog>
+
+<aside id="panel" class="panel" aria-label="Detalle de persona"></aside>
+
+<script>
+const DAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+let week = [], people = [], activeDay = 0, query = "";
+
+const store = {
+  get() { try { return localStorage.getItem("pw") || ""; } catch { return ""; } },
+  set(v) { try { localStorage.setItem("pw", v); } catch {} },
+};
+// fetch que añade la clave; ante un 401 pide la clave y reintenta.
+async function api(url, opts = {}) {
+  for (;;) {
+    const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), "x-app-password": store.get() } });
+    if (r.status !== 401) return r;
+    await askPassword(store.get() !== "");
+  }
+}
+function askPassword(wasWrong) {
+  const dlg = document.getElementById("gate"), form = document.getElementById("gateForm");
+  const input = document.getElementById("gatePw");
+  document.getElementById("gateErr").textContent = wasWrong ? "Clave incorrecta." : "";
+  input.value = "";
+  if (!dlg.open) dlg.showModal();
+  input.focus();
+  return new Promise(res => {
+    form.addEventListener("submit", () => { store.set(input.value); res(); }, { once: true });
+  });
+}
+
+const norm = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const fmt = m => { const h = Math.floor(m / 60), mm = String(m % 60).padStart(2, "0");
+  return `${(h % 12) || 12}:${mm} ${h < 12 ? "a.m." : "p.m."}`; };
+const range = (a, b) => `${fmt(a)} – ${fmt(b)}`;
+
+function el(tag, props = {}, ...kids) {
+  const n = Object.assign(document.createElement(tag), props);
+  kids.forEach(k => n.append(k));
+  return n;
+}
+// Nombre con la coincidencia de la búsqueda resaltada (sin usar innerHTML).
+function highlight(name) {
+  const q = norm(query.trim());
+  const i = q ? norm(name).indexOf(q) : -1;
+  if (i < 0) return name;
+  const f = document.createDocumentFragment();
+  f.append(name.slice(0, i), el("mark", { textContent: name.slice(i, i + q.length) }), name.slice(i + q.length));
+  return f;
+}
+
+async function load() {
+  [week, people] = await Promise.all([
+    api("/api/schedule").then(r => r.json()),
+    api("/api/people").then(r => r.json()),
+  ]);
+  if (!week[activeDay].segments.length) {
+    const first = week.findIndex(d => d.segments.length);
+    if (first >= 0) activeDay = first;
+  }
+  render();
+}
+
+function chip(name) {
+  return el("button", { className: "chip", type: "button", onclick: () => openPerson(name) }, highlight(name));
+}
+
+function render() {
+  const q = norm(query.trim());
+  const tabs = document.getElementById("tabs"), main = document.getElementById("main");
+  const peopleBox = document.getElementById("people");
+  tabs.replaceChildren(); main.replaceChildren(); peopleBox.replaceChildren();
+
+  if (!people.length) {
+    main.append(el("div", { className: "empty", textContent: "Aún no hay horarios. Sube uno o varios PDF (el nombre del archivo es el nombre de la persona)." }));
+    return;
+  }
+
+  if (q) {
+    // Modo búsqueda: personas coincidentes + sus tramos, todos los días.
+    const hits = people.filter(p => norm(p.name).includes(q));
+    hits.forEach(p => peopleBox.append(chip(p.name)));
+    let any = false;
+    week.forEach(d => {
+      const segs = d.segments.filter(s => s.people.some(n => norm(n).includes(q)));
+      if (!segs.length) return;
+      any = true;
+      main.append(daySection(DAYS[d.day], segs));
+    });
+    if (!any) main.append(el("div", { className: "empty", textContent: `Nadie coincide con «${query.trim()}».` }));
+    return;
+  }
+
+  week.forEach(d => {
+    tabs.append(el("button", {
+      className: "tab", type: "button", role: "tab", textContent: DAYS[d.day],
+      ariaSelected: String(d.day === activeDay),
+      onclick: () => { activeDay = d.day; render(); },
+    }));
+  });
+  const segs = week[activeDay].segments;
+  main.append(segs.length ? daySection(DAYS[activeDay], segs)
+    : el("div", { className: "empty", textContent: `Nadie tiene clase el ${DAYS[activeDay].toLowerCase()}.` }));
+}
+
+function daySection(title, segs) {
+  const sec = el("section", { className: "day" }, el("h2", { textContent: title }));
+  segs.forEach(s => {
+    const who = el("div", { className: "who" });
+    s.people.forEach(n => who.append(chip(n)));
+    sec.append(el("div", { className: "seg" },
+      el("div", { className: "time", textContent: range(s.start, s.end) }), who));
+  });
+  return sec;
+}
+
+async function openPerson(name) {
+  const r = await api("/api/person?name=" + encodeURIComponent(name));
+  const panel = document.getElementById("panel");
+  if (!r.ok) return;
+  const p = await r.json();
+  const body = el("div", { className: "pd" });
+  p.days.forEach(d => {
+    body.append(el("h3", { textContent: DAYS[d.day] }),
+      el("div", { className: "range", textContent: "En clase: " + d.ranges.map(([a, b]) => range(a, b)).join("  ·  ") }));
+    const t = el("table");
+    d.blocks.forEach(b => t.append(el("tr", {},
+      el("td", { textContent: range(b.start, b.end) }),
+      el("td", { textContent: [b.subject, b.tags && `(${b.tags.split("").join(",")})`, b.room].filter(Boolean).join(" · ") }))));
+    body.append(t);
+  });
+  panel.replaceChildren(
+    el("h2", { textContent: p.name }),
+    el("div", { className: "actions" },
+      el("button", { type: "button", textContent: "Cerrar", onclick: closePanel }),
+      el("button", { type: "button", className: "danger", textContent: "Eliminar persona", onclick: () => removePerson(p.name) })),
+    body);
+  panel.classList.add("open");
+}
+const closePanel = () => document.getElementById("panel").classList.remove("open");
+async function removePerson(name) {
+  if (!confirm(`¿Eliminar el horario de ${name}?`)) return;
+  await api("/api/person?name=" + encodeURIComponent(name), { method: "DELETE" });
+  closePanel(); load();
+}
+
+async function upload(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  const box = document.getElementById("report");
+  box.hidden = false;
+  const results = [];
+  // Un archivo por petición: evita el límite de tamaño de Vercel y aísla los fallos.
+  for (const [i, f] of files.entries()) {
+    box.replaceChildren(el("h2", { textContent: `Procesando ${i + 1} de ${files.length}: ${f.name}` }));
+    const fd = new FormData();
+    fd.append("files", f);
+    try {
+      const r = await api("/api/upload", { method: "POST", body: fd });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      results.push(...(await r.json()).results);
+    } catch (e) {
+      results.push({ file: f.name, ok: false, error: "No se pudo subir: " + e.message });
+    }
+  }
+  const failed = results.filter(r => !r.ok).length;
+  const ul = el("ul");
+  // Los fallos primero, con el nombre exacto del PDF.
+  [...results].sort((a, b) => a.ok - b.ok).forEach(r => {
+    ul.append(r.ok
+      ? el("li", { className: "ok", textContent: `✔ ${r.file} → ${r.name} (${r.blocks} bloques${r.updated ? ", actualizado" : ""})` })
+      : el("li", { className: "bad" }, `✘ ${r.file} `, el("span", { textContent: "— " + r.error })));
+  });
+  box.replaceChildren(
+    el("h2", { textContent: `${results.length - failed} leído(s), ${failed} con fallo` }), ul);
+  load();
+}
+
+const drop = document.getElementById("drop"), fileInput = document.getElementById("file");
+fileInput.addEventListener("change", () => { upload(fileInput.files); fileInput.value = ""; });
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => upload(e.dataTransfer.files));
+document.getElementById("q").addEventListener("input", e => { query = e.target.value; render(); });
+document.getElementById("q").addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const q = norm(query.trim()), hits = people.filter(p => norm(p.name).includes(q));
+  if (q && hits.length) openPerson(hits[0].name);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closePanel(); });
+load();
+</script>
+</body>
+</html>

@@ -334,14 +334,20 @@ function weekGrid() {
   DIAS.forEach((d) => {
     const col = el("div", { className: "daycol" });
     col.style.height = alto;
-    (S.week[d]?.segments || []).forEach((seg) => {
+    (S.week[d]?.segments || []).forEach((seg, idx) => {
       const duracion = (seg.end - seg.start) / 60;     // en horas
       const todosTrabajan = seg.working.length === seg.people.length;
       const b = el("button", {
         type: "button",
         className: todosTrabajan ? "wblock work" : "wblock",
         title: `${DAYS[d]} ${fmtRange(seg.start, seg.end)}\n${seg.people.join(", ")}`,
-        onclick: () => { S.view = "dia"; S.day = d; render(); },
+        // Al tocarlo, abre ese día y deja señalado ese tramo, no solo el día.
+        onclick: () => {
+          S.view = "dia";
+          S.day = d;
+          render();
+          requestAnimationFrame(() => focusSegment(idx));
+        },
       }, el("b", { textContent: `${seg.people.length}` }));
       // Cuántos y quiénes, seguido en la misma línea. Los nombres solo cuando el
       // bloque da de sí: en uno muy corto no cabría ni el número.

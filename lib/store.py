@@ -1,13 +1,12 @@
-"""Almacén de datos: Supabase en producción, SQLite local si no hay credenciales."""
+"""Almacén de datos: Postgres (Supabase) si hay DATABASE_URL, SQLite local si no."""
 import os
 import sqlite3
 from pathlib import Path
 
-import httpx
+import psycopg
+from psycopg.rows import dict_row
 
 from .parser import Block, norm
-
-PAGE = 1000  # PostgREST devuelve como máximo 1000 filas por petición
 
 
 class SqliteStore:
@@ -75,62 +74,66 @@ class SqliteStore:
             return con.execute("DELETE FROM people WHERE key = ?", (norm(name),)).rowcount > 0
 
 
-class SupabaseStore:
-    def __init__(self, url: str, key: str):
-        self.base = url.rstrip("/") + "/rest/v1"
-        self.headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+class PostgresStore:
+    """Tablas en el esquema `greb`, separado del resto de tablas de la base."""
 
-    def _req(self, method, path, **kw) -> httpx.Response:
-        r = httpx.request(
-            method, self.base + path, headers={**self.headers, **kw.pop("headers", {})},
-            timeout=20, **kw,
-        )
-        r.raise_for_status()
-        return r
+    def __init__(self, url: str):
+        self.url = url
+
+    def _con(self):
+        # prepare_threshold=None: el pooler de Supabase (pgbouncer) no admite prepared statements.
+        return psycopg.connect(self.url, prepare_threshold=None, row_factory=dict_row, connect_timeout=15)
 
     def save_person(self, name, filename, blocks: list[Block]) -> bool:
-        payload = {
-            "p_name": name, "p_key": norm(name), "p_filename": filename,
-            "p_blocks": [
-                {"day": b.day, "start": b.start, "end": b.end,
-                 "subject": b.subject, "room": b.room, "tags": b.tags}
-                for b in blocks
-            ],
-        }
-        return self._req("POST", "/rpc/replace_person", json=payload).json()
+        key = norm(name)
+        with self._con() as con:  # una transacción: o se guarda todo o nada
+            existed = con.execute("DELETE FROM greb.people WHERE key = %s", (key,)).rowcount > 0
+            pid = con.execute(
+                "INSERT INTO greb.people (name, key, filename) VALUES (%s, %s, %s) RETURNING id",
+                (name, key, filename),
+            ).fetchone()["id"]
+            with con.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO greb.blocks (person_id, day, start_min, end_min, subject, room, tags) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    [(pid, b.day, b.start, b.end, b.subject, b.room, b.tags) for b in blocks],
+                )
+        return existed
 
     def all_blocks(self) -> list[dict]:
-        out, offset = [], 0
-        while True:
-            rows = self._req("GET", "/blocks", params={
-                "select": "day,start:start_min,end:end_min,person:people(name)",
-                "order": "id", "limit": PAGE, "offset": offset,
-            }).json()
-            out += [{"name": r["person"]["name"], "day": r["day"],
-                     "start": r["start"], "end": r["end"]} for r in rows]
-            if len(rows) < PAGE:
-                return out
-            offset += PAGE
+        with self._con() as con:
+            return con.execute(
+                'SELECT p.name, b.day, b.start_min AS start, b.end_min AS "end" '
+                "FROM greb.blocks b JOIN greb.people p ON p.id = b.person_id"
+            ).fetchall()
 
     def list_people(self) -> list[dict]:
-        return self._req("GET", "/people", params={
-            "select": "name,filename,uploaded_at", "order": "key"}).json()
+        with self._con() as con:
+            return con.execute(
+                "SELECT name, filename, uploaded_at FROM greb.people ORDER BY key"
+            ).fetchall()
 
     def get_person(self, name):
-        rows = self._req("GET", "/people", params={
-            "key": f"eq.{norm(name)}",
-            "select": "name,blocks(day,start:start_min,end:end_min,subject,room,tags)",
-        }).json()
-        return rows[0] if rows else None
+        with self._con() as con:
+            p = con.execute(
+                "SELECT id, name FROM greb.people WHERE key = %s", (norm(name),)
+            ).fetchone()
+            if not p:
+                return None
+            blocks = con.execute(
+                'SELECT day, start_min AS start, end_min AS "end", subject, room, tags '
+                "FROM greb.blocks WHERE person_id = %s",
+                (p["id"],),
+            ).fetchall()
+        return {"name": p["name"], "blocks": blocks}
 
     def delete_person(self, name) -> bool:
-        r = self._req("DELETE", "/people", params={"key": f"eq.{norm(name)}"},
-                      headers={"Prefer": "return=representation"})
-        return bool(r.json())
+        with self._con() as con:
+            return con.execute("DELETE FROM greb.people WHERE key = %s", (norm(name),)).rowcount > 0
 
 
 def get_store():
-    url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
-    if url and key:
-        return SupabaseStore(url, key)
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        return PostgresStore(url)
     return SqliteStore(Path(__file__).resolve().parent.parent / "data.db")

@@ -5,15 +5,13 @@ Sube PDF de horarios (el nombre del archivo es el nombre de la persona) y ve qui
 - `public/index.html` — interfaz (la sirve Vercel como estática)
 - `api/index.py` — API FastAPI (función Python de Vercel)
 - `lib/` — lector de PDF, cálculo de tramos, acceso a datos
-- `supabase/schema.sql` — tablas y función `replace_person`
+- `supabase/schema.sql` — tablas (esquema `greb`)
 
 ## Desplegar
 
-1. **Supabase**: crea un proyecto, abre *SQL Editor* y ejecuta `supabase/schema.sql`.
-   Copia la *Project URL* y la clave `service_role` (Settings > API).
-2. **Vercel**: importa la carpeta/repo y define estas variables de entorno:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_KEY` (la `service_role`; nunca en el frontend)
+1. **Base de datos**: ejecuta `supabase/schema.sql` una vez (Supabase > SQL Editor). Crea el esquema `greb`, aparte de las demás tablas.
+2. **Vercel**: importa el repo y define estas variables de entorno:
+   - `DATABASE_URL` (cadena de conexión de Supabase, *transaction pooler* `:6543`)
    - `APP_PASSWORD` (clave de acceso a la web; si no se define, queda abierta)
 3. Despliega (`vercel --prod`).
 
@@ -24,4 +22,4 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/uvicorn api.index:app --port 8765   # http://localhost:8765
 ```
 
-Sin `SUPABASE_URL` usa un `data.db` SQLite local. Con las variables definidas usa Supabase.
+Sin `DATABASE_URL` usa un `data.db` SQLite local. Con ella definida usa Postgres (Supabase).

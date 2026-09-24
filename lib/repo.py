@@ -244,20 +244,27 @@ def create_person(c: Conn, group_id: int, name: str) -> int:
     )[0]["id"]
 
 
-def add_work_block(c: Conn, pid: int, day: int, start: int, end: int, place: str) -> int:
+def add_block(c: Conn, pid: int, day: int, start: int, end: int,
+              subject: str, room: str, kind: str, tags: str = "") -> int:
     return c.query(
         "INSERT INTO horarios.blocks (person_id, day, start_min, end_min, subject, room, tags, kind) "
-        "VALUES (?, ?, ?, ?, 'Trabajo', ?, '', 'trabajo') RETURNING id",
-        (pid, day, start, end, place),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        (pid, day, start, end, subject, room, tags, kind),
     )[0]["id"]
 
 
 def delete_block(c: Conn, pid: int, block_id: int) -> bool:
-    """Solo bloques de trabajo: los de clase se rehacen volviendo a subir el PDF."""
+    """Cualquier bloque de esa persona. Los que vinieron de un PDF se recuperan
+    volviendo a subirlo."""
     return c.execute(
-        "DELETE FROM horarios.blocks WHERE id = ? AND person_id = ? AND kind = 'trabajo'",
-        (block_id, pid),
+        "DELETE FROM horarios.blocks WHERE id = ? AND person_id = ?", (block_id, pid)
     ) > 0
+
+
+def delete_blocks_of_kind(c: Conn, pid: int, kind: str) -> int:
+    return c.execute(
+        "DELETE FROM horarios.blocks WHERE person_id = ? AND kind = ?", (pid, kind)
+    )
 
 
 def all_blocks(c: Conn, group_id: int) -> list[dict]:

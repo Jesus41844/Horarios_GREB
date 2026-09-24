@@ -59,10 +59,10 @@ export const api = {
   people: (slug) => request(`/g/${encodeURIComponent(slug)}/people`),
   person: (slug, name) =>
     request(`/g/${encodeURIComponent(slug)}/person?name=${encodeURIComponent(name)}`),
-  addWork: (slug, data) =>
-    request(`/g/${encodeURIComponent(slug)}/work`, { method: "POST", json: data }),
-  deleteWork: (slug, id, name) =>
-    request(`/g/${encodeURIComponent(slug)}/work/${id}?name=${encodeURIComponent(name)}`,
+  addBlocks: (slug, data) =>
+    request(`/g/${encodeURIComponent(slug)}/blocks`, { method: "POST", json: data }),
+  deleteBlock: (slug, id, name) =>
+    request(`/g/${encodeURIComponent(slug)}/block/${id}?name=${encodeURIComponent(name)}`,
       { method: "DELETE" }),
   deleteAllPeople: (slug) =>
     request(`/g/${encodeURIComponent(slug)}/people`, { method: "DELETE" }),

@@ -446,3 +446,27 @@ button, input, select { font: inherit; color: inherit; }
 .track-head .legend .empty-key::before {
   background: var(--card); box-shadow: inset 0 0 0 1px var(--line);
 }
+
+/* --- revisión del OCR --------------------------------------------------- */
+
+/* Dos líneas por fila: arriba cuándo, abajo qué. La materia es lo que más hay
+   que revisar, así que necesita ancho de verdad. */
+.ocr-row {
+  display: grid; grid-template-columns: 62px 1fr 1fr 30px;
+  gap: 4px; align-items: center; margin-bottom: 6px;
+  padding: 7px; border: 1px solid var(--line); border-radius: 8px;
+}
+.ocr-row select, .ocr-row input {
+  width: 100%; min-width: 0; padding: 5px 6px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--card);
+}
+.ocr-row .mat { grid-column: 1 / 3; }
+.ocr-row .aula { grid-column: 3 / 5; }
+.ocr-row .btn { padding: 4px 0; justify-content: center; font-size: 15px; line-height: 1; }
+
+.pday td.del { width: 30px; padding-right: 0; }
+.pday td.del .btn { padding: 2px 7px; font-size: 14px; line-height: 1; }
+
+@media (max-width: 620px) {
+  .ocr-row { grid-template-columns: 58px 1fr 1fr 30px; }
+}

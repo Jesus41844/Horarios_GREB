@@ -5,6 +5,8 @@ Cada agrupación sube los PDF de horario de su gente y la web responde la pregun
 huecos y deja buscar a cualquier persona por su nombre.
 
 El nombre del archivo es el nombre de la persona: `Juan Pérez.pdf` → Juan Pérez.
+Acepta **PDF** (lectura exacta) e **imágenes** (con OCR y revisión obligatoria), y también
+se puede teclear el horario a mano.
 
 ## Cómo funciona
 
@@ -20,6 +22,12 @@ El nombre del archivo es el nombre de la persona: `Juan Pérez.pdf` → Juan Pé
 - **Detalle** — al pulsar un nombre se abre su semana con materia, aula y marcas `(L)`, `(B)`.
 - **Informe de subida** — cada archivo se procesa por separado. Los que fallan salen primero,
   con su nombre exacto y el motivo; uno roto no bloquea a los demás.
+- **Imágenes** — una captura del horario se lee con OCR **en el navegador** de quien la sube
+  (Tesseract desde CDN; el servidor de Vercel no tiene el binario). Lo que sale es una
+  propuesta editable: no se guarda nada hasta que el admin la revisa. Al guardar reemplaza
+  las clases de esa persona y deja intacto su horario de trabajo.
+- **A mano** — desde la ficha de una persona se añade cualquier bloque (clase o trabajo) y se
+  borra cualquiera. Es el respaldo cuando el OCR falla o la imagen es mala.
 - **Borrar horarios** — Ajustes → Horarios lista a todo el mundo con su archivo y su fecha,
   para borrar uno a uno o vaciar la agrupación entera. También desde el detalle de la persona.
 
@@ -88,6 +96,9 @@ Sin `DATABASE_URL` usa un `data.db` SQLite y crea las tablas solo. Con ella, hab
 - Cada subida va en su propia petición: Vercel limita cada una a ~4,5 MB.
 - El lector espera la tabla `HORAS × días` de los horarios de la UTP (Crystal Reports), con
   texto seleccionable. Un PDF escaneado se rechaza con ese motivo en vez de adivinar.
+- **El OCR no es exacto** y por eso la revisión es obligatoria: en la prueba con una captura
+  del PDF de ejemplo leyó 17 de 18 bloques y confundió alguna marca `(L)`. Sirve para no
+  teclearlo todo, no para confiar a ciegas.
 - **Migraciones**: `db/migrations.sql` se aplica solo, una vez por proceso, cuando la app
   detecta que falta algún cambio. Es así porque quien administra no puede abrir el puerto de
   Postgres desde su red. `GET /api/setup` devuelve `migrated` para comprobarlo desde fuera.

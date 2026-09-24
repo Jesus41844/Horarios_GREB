@@ -16,12 +16,19 @@ router = APIRouter(prefix="/g/{slug}", tags=["horarios"])
 MAX_PDF_BYTES = 4 * 1024 * 1024  # Vercel limita cada petición a ~4,5 MB
 
 
-class WorkIn(BaseModel):
-    name: str            # a quién; si no existe en la agrupación, se crea
+class BlockIn(BaseModel):
     day: int             # 0 = lunes ... 6 = domingo
     start: str           # "14:00"
     end: str             # "18:30"
-    place: str = ""
+    subject: str = ""    # materia; vacío en trabajo
+    room: str = ""       # aula o lugar
+    kind: str = "clase"  # "clase" o "trabajo"
+
+
+class BlocksIn(BaseModel):
+    name: str                  # a quién; si no está en la agrupación, se crea
+    blocks: list[BlockIn]
+    replace_kind: str | None = None   # borra antes los bloques de ese tipo
 
 
 def _minutes(hhmm: str) -> int:
@@ -107,33 +114,48 @@ def person(name: str, access: Access = Depends(group_access), c: Conn = Depends(
     }
 
 
-@router.post("/work")
-def add_work(body: WorkIn, access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
-    """Añade una franja de trabajo. Si la persona no está todavía, la crea sin PDF."""
+@router.post("/blocks")
+def add_blocks(body: BlocksIn, access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+    """Añade bloques a mano: una clase suelta, una franja de trabajo, o todo el
+    horario que salió del OCR de una imagen después de que el admin lo revisara.
+    Si la persona no existe en la agrupación, se crea sin PDF."""
     name = body.name.strip()
     if not name:
         raise HTTPException(400, "Falta el nombre de la persona.")
-    if not 0 <= body.day <= 6:
-        raise HTTPException(400, "Día no válido.")
-    start, end = _minutes(body.start), _minutes(body.end)
-    if start >= end:
-        raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
+    if not body.blocks:
+        raise HTTPException(400, "No hay ningún bloque que guardar.")
+    if body.replace_kind not in (None, "clase", "trabajo"):
+        raise HTTPException(400, "Tipo no válido.")
+
+    limpios = []
+    for b in body.blocks:
+        if b.kind not in ("clase", "trabajo"):
+            raise HTTPException(400, f"Tipo no válido: «{b.kind}».")
+        if not 0 <= b.day <= 6:
+            raise HTTPException(400, "Día no válido.")
+        start, end = _minutes(b.start), _minutes(b.end)
+        if start >= end:
+            raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
+        asunto = b.subject.strip() or ("Trabajo" if b.kind == "trabajo" else "Clase")
+        limpios.append((b.day, start, end, asunto, b.room.strip(), b.kind))
 
     pid = repo.person_id(c, access.group["id"], name)
     creada = pid is None
     if creada:
         pid = repo.create_person(c, access.group["id"], name)
-    block_id = repo.add_work_block(c, pid, body.day, start, end, body.place.strip())
+    if body.replace_kind:
+        repo.delete_blocks_of_kind(c, pid, body.replace_kind)
+    ids = [repo.add_block(c, pid, *args) for args in limpios]
     c.commit()
-    return {"id": block_id, "name": name, "created": creada}
+    return {"name": name, "created": creada, "ids": ids}
 
 
-@router.delete("/work/{block_id}")
-def delete_work(block_id: int, name: str,
-                access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+@router.delete("/block/{block_id}")
+def delete_block(block_id: int, name: str,
+                 access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
     pid = repo.person_id(c, access.group["id"], name)
     if pid is None or not repo.delete_block(c, pid, block_id):
-        raise HTTPException(404, "Esa franja de trabajo no existe.")
+        raise HTTPException(404, "Ese bloque no existe.")
     c.commit()
     return {"deleted": block_id}
 

@@ -1,4 +1,5 @@
 import { ApiError, api } from "./api.js";
+import { leerImagen } from "./ocr.js";
 import {
   DAYS, clear, el, fmt, fmtRange, highlight, hourLabel, minutesNow, norm, people, todayIndex,
 } from "./dom.js";
@@ -513,10 +514,11 @@ function searchResults() {
 function dropzone() {
   // sr-only y no `hidden`: así el campo sigue recibiendo el foco del teclado.
   const input = el("input", {
-    type: "file", accept: ".pdf,application/pdf", multiple: true, className: "sr-only",
+    type: "file", accept: ".pdf,application/pdf,image/*", multiple: true, className: "sr-only",
   });
   const zone = el("label", { className: "drop" },
-    "Suelta aquí los PDF o haz clic para elegirlos. El nombre del archivo es el nombre de la persona.", input);
+    "Suelta aquí los PDF o las imágenes, o haz clic para elegirlos. El nombre del archivo es el nombre de la persona.",
+    input);
 
   input.addEventListener("change", () => { const f = [...input.files]; input.value = ""; upload(f); });
   ["dragenter", "dragover"].forEach((ev) =>
@@ -527,8 +529,17 @@ function dropzone() {
   return zone;
 }
 
+const esImagen = (f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
+
 async function upload(files) {
   if (!files.length) return;
+  const imagenes = files.filter(esImagen);
+  files = files.filter((f) => !esImagen(f));
+  // Las imágenes no se guardan directamente: se leen y se revisan antes.
+  if (imagenes.length) {
+    if (files.length) await upload(files);
+    return revisarImagen(imagenes[0], imagenes.slice(1));
+  }
   const results = [];
   // Un archivo por petición: Vercel limita el tamaño de cada una y así un
   // archivo roto no se lleva por delante a los demás.
@@ -545,6 +556,117 @@ async function upload(files) {
   S.report = { results };
   await load();
 }
+
+/** Lee la imagen y abre la revisión. Nada se guarda hasta que el admin confirma. */
+async function revisarImagen(file, pendientes = []) {
+  S.report = { progress: `Leyendo ${file.name}… la primera vez tarda, descarga el lector.` };
+  render();
+  let bloques;
+  try {
+    bloques = await leerImagen(file, (p) => {
+      S.report = { progress: `Leyendo ${file.name}… ${Math.round(p * 100)} %` };
+      render();
+    });
+  } catch (err) {
+    S.report = { results: [{ file: file.name, ok: false, error: err.message }] };
+    render();
+    if (pendientes.length) await revisarImagen(pendientes[0], pendientes.slice(1));
+    return;
+  }
+  S.report = null;
+  render();
+  panelRevision(person_from_filename(file.name), bloques, pendientes);
+}
+
+const person_from_filename = (nombre) =>
+  nombre.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** Tabla editable con lo que se leyó. El OCR se equivoca: esto es el filtro. */
+function panelRevision(nombre, bloques, pendientes = []) {
+  const filas = bloques.map((b) => ({ ...b }));
+  const note = el("div");
+  const cuerpo = el("div");
+
+  const nombreInput = el("input", { type: "text", value: nombre, required: true });
+
+  const pintar = () => {
+    clear(cuerpo);
+    if (!filas.length) {
+      cuerpo.append(el("p", { className: "sub", textContent: "No queda ninguna fila." }));
+      return;
+    }
+    filas.forEach((f, i) => {
+      const dia = el("select", { className: "dia", ariaLabel: "Día" }, ...DAYS.map((d, n) =>
+        el("option", { value: String(n), textContent: d.slice(0, 3), selected: n === f.day })));
+      dia.onchange = () => { f.day = Number(dia.value); };
+      const desde = el("input", { type: "time", className: "t1", value: hhmm(f.start), ariaLabel: "Entra" });
+      desde.onchange = () => { f.start = deHhmm(desde.value); };
+      const hasta = el("input", { type: "time", className: "t2", value: hhmm(f.end), ariaLabel: "Sale" });
+      hasta.onchange = () => { f.end = deHhmm(hasta.value); };
+      const materia = el("input", {
+        type: "text", className: "mat", value: f.subject, placeholder: "Materia", ariaLabel: "Materia",
+      });
+      materia.oninput = () => { f.subject = materia.value; };
+      const aula = el("input", {
+        type: "text", className: "aula", value: f.room, placeholder: "Aula", ariaLabel: "Aula",
+      });
+      aula.oninput = () => { f.room = aula.value; };
+
+      cuerpo.append(el("div", { className: "ocr-row" },
+        dia, desde, hasta,
+        el("button", {
+          className: "btn btn-danger x", type: "button", textContent: "×",
+          ariaLabel: `Quitar la fila ${i + 1}`,
+          onclick: () => { filas.splice(i, 1); pintar(); },
+        }),
+        materia, aula));
+    });
+  };
+  pintar();
+
+  const guardar = el("button", {
+    className: "btn btn-primary", type: "button",
+    textContent: "Guardar el horario",
+    onclick: async () => {
+      const quien = nombreInput.value.trim();
+      if (!quien) return clear(note).append(
+        el("p", { className: "note err", textContent: "Falta el nombre de la persona." }));
+      if (!filas.length) return clear(note).append(
+        el("p", { className: "note err", textContent: "No hay ninguna fila que guardar." }));
+      try {
+        await api.addBlocks(S.slug, {
+          name: quien, replace_kind: "clase",
+          blocks: filas.map((f) => ({
+            day: f.day, start: hhmm(f.start), end: hhmm(f.end),
+            subject: f.subject, room: f.room, kind: "clase",
+          })),
+        });
+        closePanel();
+        S.report = { results: [{ file: `imagen de ${quien}`, ok: true, name: quien, blocks: filas.length }] };
+        await load();
+        if (pendientes.length) await revisarImagen(pendientes[0], pendientes.slice(1));
+      } catch (err) {
+        clear(note).append(el("p", { className: "note err", textContent: err.message }));
+      }
+    },
+  });
+
+  openPanel(
+    ...panelHead("Revisa lo que se leyó",
+      "El lector de imágenes se equivoca. Corrige lo que haga falta antes de guardar."),
+    note,
+    el("label", { className: "field" }, el("span", { textContent: "¿De quién es este horario?" }), nombreInput),
+    cuerpo,
+    el("button", {
+      className: "btn", type: "button", textContent: "Añadir una fila",
+      onclick: () => { filas.push({ day: 0, start: 420, end: 465, subject: "", room: "", kind: "clase" }); pintar(); },
+    }),
+    el("p", { className: "sub", textContent: "Al guardar se reemplazan las clases que ya tuviera. Su horario de trabajo no se toca." }),
+    guardar);
+}
+
+const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+const deHhmm = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 
 function reportCard(report) {
   if (report.progress) {
@@ -617,7 +739,18 @@ async function openPerson(name) {
             b.kind === "trabajo" ? " " : null,
             b.subject,
             b.tags ? el("span", { className: "tag", textContent: b.tags.split("").join(" ") }) : null,
-            b.room ? el("div", { className: "room", textContent: b.room }) : null)))))));
+            b.room ? el("div", { className: "room", textContent: b.room }) : null),
+          isAdmin()
+            ? el("td", { className: "del" }, el("button", {
+              className: "btn btn-danger", type: "button", textContent: "×",
+              ariaLabel: `Quitar ${b.subject}`,
+              onclick: async () => {
+                await api.deleteBlock(S.slug, b.id, p.name);
+                await load();
+                openPerson(p.name);
+              },
+            }))
+            : null))))));
 
   const remove = isAdmin()
     ? el("button", {
@@ -638,45 +771,37 @@ async function openPerson(name) {
 
   openPanel(
     ...panelHead(p.name, resumen),
-    isAdmin() ? workSection(p) : null,
+    isAdmin() ? addBlockSection(p) : null,
     ...days,
     remove);
 }
 
-/** Horario laboral de una persona: añadir franjas y quitarlas. */
-function workSection(p) {
-  const bloques = p.days.flatMap((d) =>
-    d.blocks.filter((b) => b.kind === "trabajo").map((b) => ({ ...b, day: d.day })));
+/** Añadir un bloque a mano: una clase (cuando solo hay una imagen) o trabajo. */
+function addBlockSection(p) {
   const note = el("div");
-
-  const lista = bloques.length
-    ? el("ul", { className: "work-list" }, ...bloques.map((b) =>
-      el("li", {},
-        el("div", { className: "w" },
-          el("b", { textContent: `${DAYS[b.day]}, ${fmt(b.start)} – ${fmt(b.end)}` }),
-          b.room ? el("span", { textContent: b.room }) : null),
-        el("button", {
-          className: "btn btn-danger", type: "button", textContent: "Quitar",
-          onclick: async () => {
-            await api.deleteWork(S.slug, b.id, p.name);
-            await load();
-            openPerson(p.name);
-          },
-        }))))
-    : el("p", { className: "sub", textContent: "No tiene horario de trabajo registrado." });
-
+  const tipo = el("select", {},
+    el("option", { value: "clase", textContent: "Clase" }),
+    el("option", { value: "trabajo", textContent: "Trabajo" }));
   const day = el("select", {}, ...DAYS.map((d, i) => el("option", { value: String(i), textContent: d })));
-  const desde = el("input", { type: "time", required: true, value: "14:00" });
-  const hasta = el("input", { type: "time", required: true, value: "18:00" });
-  const lugar = el("input", { type: "text", placeholder: "Dónde (opcional)" });
+  const desde = el("input", { type: "time", required: true, value: "07:00" });
+  const hasta = el("input", { type: "time", required: true, value: "07:45" });
+  const materia = el("input", { type: "text", placeholder: "Materia" });
+  const lugar = el("input", { type: "text", placeholder: "Aula o lugar" });
+
+  // El trabajo no lleva materia: se etiqueta solo.
+  tipo.onchange = () => { materia.parentElement.hidden = tipo.value === "trabajo"; };
 
   const form = el("form", {
     onsubmit: async (e) => {
       e.preventDefault();
       try {
-        await api.addWork(S.slug, {
-          name: p.name, day: Number(day.value),
-          start: desde.value, end: hasta.value, place: lugar.value,
+        await api.addBlocks(S.slug, {
+          name: p.name,
+          blocks: [{
+            day: Number(day.value), start: desde.value, end: hasta.value,
+            subject: tipo.value === "trabajo" ? "" : materia.value,
+            room: lugar.value, kind: tipo.value,
+          }],
         });
         await load();
         openPerson(p.name);
@@ -686,14 +811,19 @@ function workSection(p) {
     },
   },
     el("div", { className: "three" },
+      el("label", { className: "field" }, el("span", { textContent: "Tipo" }), tipo),
       el("label", { className: "field" }, el("span", { textContent: "Día" }), day),
-      el("label", { className: "field" }, el("span", { textContent: "Entra" }), desde),
-      el("label", { className: "field" }, el("span", { textContent: "Sale" }), hasta)),
-    el("label", { className: "field" }, el("span", { textContent: "Lugar" }), lugar),
-    el("button", { className: "btn btn-primary", type: "submit", textContent: "Añadir franja de trabajo" }));
+      el("label", { className: "field" }, el("span", { textContent: "Entra" }), desde)),
+    el("div", { className: "three" },
+      el("label", { className: "field" }, el("span", { textContent: "Sale" }), hasta),
+      el("label", { className: "field" }, el("span", { textContent: "Materia" }), materia),
+      el("label", { className: "field" }, el("span", { textContent: "Aula o lugar" }), lugar)),
+    el("button", { className: "btn btn-primary", type: "submit", textContent: "Añadir al horario" }));
 
   return el("div", { className: "form-card" },
-    el("h3", { textContent: "Trabajo" }), note, lista, form);
+    el("h3", { textContent: "Añadir a mano" }),
+    el("p", { className: "sub", textContent: "Para completar lo que falte, o cuando el horario viene en una imagen." }),
+    note, form);
 }
 
 // --- ajustes --------------------------------------------------------------
@@ -769,7 +899,10 @@ function schedulesView() {
         const quien = nombre.value.trim();
         if (!quien) return;
         try {
-          await api.addWork(S.slug, { name: quien, day: 0, start: "08:00", end: "12:00" });
+          await api.addBlocks(S.slug, {
+            name: quien,
+            blocks: [{ day: 0, start: "08:00", end: "12:00", kind: "trabajo" }],
+          });
           await load();
           closePanel();
           openPerson(quien);

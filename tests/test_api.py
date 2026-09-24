@@ -306,14 +306,17 @@ def test_miembro_no_puede_vaciar_la_agrupacion(client):
     assert client.delete("/api/g/greb/people").status_code == 403
     assert len(client.get("/api/g/greb/people").json()) == 1
 
+def _bloque(**kw):
+    base = {"day": 0, "start": "14:00", "end": "18:00", "kind": "trabajo"}
+    return {**base, **kw}
+
 
 def test_horario_laboral(client):
     login(client, "greb@x.com")
     upload(client, "greb", "Juan Pérez")   # tiene clases lunes 7:00–11:55
 
-    # Juan trabaja el lunes por la tarde.
-    r = client.post("/api/g/greb/work", json={
-        "name": "Juan Pérez", "day": 0, "start": "14:00", "end": "18:00", "place": "FabLab"})
+    r = client.post("/api/g/greb/blocks", json={
+        "name": "Juan Pérez", "blocks": [_bloque(room="FabLab")]})
     assert r.status_code == 200 and r.json()["created"] is False
 
     p = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()
@@ -324,7 +327,6 @@ def test_horario_laboral(client):
     assert (trabajo[0]["start"], trabajo[0]["end"], trabajo[0]["room"]) == (840, 1080, "FabLab")
     assert lunes["ranges"] == [[420, 715], [840, 1080]]   # clase y trabajo, separados
 
-    # En la vista general sale como ocupado y marcado de trabajo.
     lunes_sem = client.get("/api/g/greb/schedule").json()[0]["segments"]
     tarde = [s for s in lunes_sem if s["start"] == 840][0]
     assert tarde["people"] == ["Juan Pérez"] and tarde["working"] == ["Juan Pérez"]
@@ -334,8 +336,9 @@ def test_horario_laboral(client):
 
 def test_trabajo_crea_persona_sin_pdf(client):
     login(client, "greb@x.com")
-    r = client.post("/api/g/greb/work", json={
-        "name": "Rosa Batista", "day": 2, "start": "8:00", "end": "12:00"})
+    r = client.post("/api/g/greb/blocks", json={
+        "name": "Rosa Batista",
+        "blocks": [{"day": 2, "start": "8:00", "end": "12:00", "kind": "trabajo"}]})
     assert r.json()["created"] is True
 
     gente = client.get("/api/g/greb/people").json()
@@ -344,40 +347,74 @@ def test_trabajo_crea_persona_sin_pdf(client):
     assert p["works"] is True and len(p["days"]) == 1
 
 
-def test_trabajo_valida_y_se_borra(client):
+def test_alta_manual_de_clases(client):
+    """Cuando solo hay una imagen, el horario se teclea y queda igual que un PDF."""
+    login(client, "greb@x.com")
+    r = client.post("/api/g/greb/blocks", json={
+        "name": "Sofía Ng",
+        "blocks": [
+            {"day": 0, "start": "7:00", "end": "7:45",
+             "subject": "HER. PROG. AP.", "room": "aula 3-405", "kind": "clase"},
+            {"day": 0, "start": "7:50", "end": "8:35",
+             "subject": "HER. PROG. AP.", "room": "aula 3-405", "kind": "clase"},
+        ]})
+    assert r.json()["created"] is True and len(r.json()["ids"]) == 2
+
+    p = client.get("/api/g/greb/person", params={"name": "sofia ng"}).json()
+    assert p["works"] is False                     # son clases, no trabajo
+    assert p["days"][0]["ranges"] == [[420, 515]]   # los dos bloques seguidos se unen
+    assert p["days"][0]["blocks"][0]["subject"] == "HER. PROG. AP."
+
+    lunes = client.get("/api/g/greb/schedule").json()[0]["segments"]
+    assert lunes[0]["people"] == ["Sofía Ng"] and lunes[0]["working"] == []
+
+
+def test_replace_kind_sustituye_solo_ese_tipo(client):
+    """Guardar un OCR revisado reemplaza las clases y respeta el trabajo."""
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    client.post("/api/g/greb/blocks", json={"name": "Juan Pérez", "blocks": [_bloque()]})
+
+    client.post("/api/g/greb/blocks", json={
+        "name": "Juan Pérez", "replace_kind": "clase",
+        "blocks": [{"day": 4, "start": "9:00", "end": "10:00",
+                    "subject": "NUEVA", "kind": "clase"}]})
+
+    p = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()
+    clases = [b for d in p["days"] for b in d["blocks"] if b["kind"] == "clase"]
+    trabajo = [b for d in p["days"] for b in d["blocks"] if b["kind"] == "trabajo"]
+    assert [b["subject"] for b in clases] == ["NUEVA"]   # las 18 del PDF se fueron
+    assert len(trabajo) == 1                              # el trabajo sigue intacto
+
+
+def test_bloques_validan_y_se_borran(client):
     login(client, "greb@x.com")
     malos = [
-        {"name": "X", "day": 0, "start": "18:00", "end": "14:00"},   # al revés
-        {"name": "X", "day": 0, "start": "25:00", "end": "26:00"},   # fuera de rango
-        {"name": "X", "day": 0, "start": "ocho", "end": "12:00"},    # no es una hora
-        {"name": "", "day": 0, "start": "8:00", "end": "12:00"},     # sin nombre
-        {"name": "X", "day": 9, "start": "8:00", "end": "12:00"},    # día inexistente
+        {"name": "X", "blocks": [_bloque(start="18:00", end="14:00")]},
+        {"name": "X", "blocks": [_bloque(start="25:00", end="26:00")]},
+        {"name": "X", "blocks": [_bloque(start="ocho")]},
+        {"name": "", "blocks": [_bloque()]},
+        {"name": "X", "blocks": [_bloque(day=9)]},
+        {"name": "X", "blocks": [_bloque(kind="siesta")]},
+        {"name": "X", "blocks": []},
+        {"name": "X", "blocks": [_bloque()], "replace_kind": "todo"},
     ]
     for cuerpo in malos:
-        assert client.post("/api/g/greb/work", json=cuerpo).status_code == 400, cuerpo
+        assert client.post("/api/g/greb/blocks", json=cuerpo).status_code == 400, cuerpo
 
-    bid = client.post("/api/g/greb/work", json={
-        "name": "Ana Gómez", "day": 1, "start": "9:00", "end": "13:00"}).json()["id"]
-    assert client.delete(f"/api/g/greb/work/{bid}", params={"name": "Ana Gómez"}).status_code == 200
-    assert client.delete(f"/api/g/greb/work/{bid}", params={"name": "Ana Gómez"}).status_code == 404
+    bid = client.post("/api/g/greb/blocks", json={
+        "name": "Ana Gómez", "blocks": [_bloque()]}).json()["ids"][0]
+    assert client.delete(f"/api/g/greb/block/{bid}", params={"name": "Ana Gómez"}).status_code == 200
+    assert client.delete(f"/api/g/greb/block/{bid}", params={"name": "Ana Gómez"}).status_code == 404
 
 
-def test_miembro_no_puede_tocar_el_trabajo(client):
+def test_miembro_no_puede_tocar_los_bloques(client):
     login(client, "greb@x.com")
-    bid = client.post("/api/g/greb/work", json={
-        "name": "Ana Gómez", "day": 1, "start": "9:00", "end": "13:00"}).json()["id"]
+    bid = client.post("/api/g/greb/blocks", json={
+        "name": "Ana Gómez", "blocks": [_bloque()]}).json()["ids"][0]
     client.post("/api/auth/logout")
 
     login(client, "ve@x.com")   # miembro
-    assert client.post("/api/g/greb/work", json={
-        "name": "Otro", "day": 1, "start": "9:00", "end": "13:00"}).status_code == 403
-    assert client.delete(f"/api/g/greb/work/{bid}", params={"name": "Ana Gómez"}).status_code == 403
-
-
-def test_no_se_borran_bloques_de_clase_por_la_via_del_trabajo(client):
-    login(client, "greb@x.com")
-    upload(client, "greb", "Juan Pérez")
-    p = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()
-    clase = p["days"][0]["blocks"][0]
-    assert client.delete(f"/api/g/greb/work/{clase['id']}",
-                         params={"name": "Juan Pérez"}).status_code == 404
+    assert client.post("/api/g/greb/blocks", json={
+        "name": "Otro", "blocks": [_bloque()]}).status_code == 403
+    assert client.delete(f"/api/g/greb/block/{bid}", params={"name": "Ana Gómez"}).status_code == 403

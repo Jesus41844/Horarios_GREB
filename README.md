@@ -8,8 +8,13 @@ El nombre del archivo es el nombre de la persona: `Juan Pérez.pdf` → Juan Pé
 
 ## Cómo funciona
 
+- **Semana** — rejilla de lunes a viernes, como la tabla del horario impreso: cada bloque es
+  un tramo ocupado y el blanco es tiempo libre. Al pulsar un bloque se abre ese día.
 - **Pista del día** — una regla horaria con una barra por tramo (más alta cuanta más gente
   en clase), los huecos etiquetados en ámbar y una línea que marca la hora actual.
+- **Horario laboral** — desde la ficha de una persona se le añaden franjas de trabajo, que
+  cuentan como ocupación igual que las clases. También se puede dar de alta a alguien que
+  solo trabaja, sin PDF.
 - **Tramos** — los bloques seguidos de una persona se unen si la pausa es de 10 min o menos,
   así un horario de 7:00 a 11:55 sale como un solo rango y no como seis bloques.
 - **Detalle** — al pulsar un nombre se abre su semana con materia, aula y marcas `(L)`, `(B)`.
@@ -42,6 +47,7 @@ lib/
   db.py            Postgres si hay DATABASE_URL, SQLite si no
   routes/          auth, groups, data
 db/schema.sql      esquema `horarios` (fuente única)
+db/migrations.sql  cambios sobre bases ya creadas; la app los aplica sola al arrancar
 scripts/manage.py  migrar y crear la primera cuenta
 tests/             pruebas de la API
 ```
@@ -82,6 +88,9 @@ Sin `DATABASE_URL` usa un `data.db` SQLite y crea las tablas solo. Con ella, hab
 - Cada subida va en su propia petición: Vercel limita cada una a ~4,5 MB.
 - El lector espera la tabla `HORAS × días` de los horarios de la UTP (Crystal Reports), con
   texto seleccionable. Un PDF escaneado se rechaza con ese motivo en vez de adivinar.
+- **Migraciones**: `db/migrations.sql` se aplica solo, una vez por proceso, cuando la app
+  detecta que falta algún cambio. Es así porque quien administra no puede abrir el puerto de
+  Postgres desde su red. `GET /api/setup` devuelve `migrated` para comprobarlo desde fuera.
 
 ## Primera cuenta
 

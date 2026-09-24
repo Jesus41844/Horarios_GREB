@@ -40,7 +40,18 @@ def _needed(c: Conn) -> bool:
 
 @router.get("")
 def status(c: Conn = Depends(get_conn)):
-    return {"needed": _needed(c)}
+    """`migrated` permite comprobar desde fuera que el despliegue aplicó los
+    cambios de esquema, sin necesidad de abrir el puerto de Postgres."""
+    return {"needed": _needed(c), "migrated": _migrated(c)}
+
+
+def _migrated(c: Conn) -> bool:
+    if not c.pg:
+        return True  # SQLite rehace las tablas desde schema.sql en cada conexión
+    return bool(c.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = 'horarios' "
+        "AND table_name = 'blocks' AND column_name = 'kind'"
+    ))
 
 
 @router.post("")

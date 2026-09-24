@@ -221,16 +221,48 @@ def save_person(c: Conn, group_id: int, name: str, filename: str, blocks: list[B
         (group_id, name, key, filename, now()),
     )[0]["id"]
     c.executemany(
-        "INSERT INTO horarios.blocks (person_id, day, start_min, end_min, subject, room, tags) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO horarios.blocks (person_id, day, start_min, end_min, subject, room, tags, kind) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'clase')",
         [(pid, b.day, b.start, b.end, b.subject, b.room, b.tags) for b in blocks],
     )
     return existed
 
 
+def person_id(c: Conn, group_id: int, name: str) -> int | None:
+    rows = c.query(
+        "SELECT id FROM horarios.people WHERE group_id = ? AND key = ?", (group_id, norm(name))
+    )
+    return rows[0]["id"] if rows else None
+
+
+def create_person(c: Conn, group_id: int, name: str) -> int:
+    """Persona sin PDF: alguien que solo tiene horario de trabajo."""
+    return c.query(
+        "INSERT INTO horarios.people (group_id, name, key, filename, uploaded_at) "
+        "VALUES (?, ?, ?, '', ?) RETURNING id",
+        (group_id, name, norm(name), now()),
+    )[0]["id"]
+
+
+def add_work_block(c: Conn, pid: int, day: int, start: int, end: int, place: str) -> int:
+    return c.query(
+        "INSERT INTO horarios.blocks (person_id, day, start_min, end_min, subject, room, tags, kind) "
+        "VALUES (?, ?, ?, ?, 'Trabajo', ?, '', 'trabajo') RETURNING id",
+        (pid, day, start, end, place),
+    )[0]["id"]
+
+
+def delete_block(c: Conn, pid: int, block_id: int) -> bool:
+    """Solo bloques de trabajo: los de clase se rehacen volviendo a subir el PDF."""
+    return c.execute(
+        "DELETE FROM horarios.blocks WHERE id = ? AND person_id = ? AND kind = 'trabajo'",
+        (block_id, pid),
+    ) > 0
+
+
 def all_blocks(c: Conn, group_id: int) -> list[dict]:
     return c.query(
-        'SELECT p.name, b.day, b.start_min AS start, b.end_min AS "end" '
+        'SELECT p.name, b.day, b.start_min AS start, b.end_min AS "end", b.kind '
         "FROM horarios.blocks b JOIN horarios.people p ON p.id = b.person_id "
         "WHERE p.group_id = ?",
         (group_id,),
@@ -239,7 +271,10 @@ def all_blocks(c: Conn, group_id: int) -> list[dict]:
 
 def list_people(c: Conn, group_id: int) -> list[dict]:
     return c.query(
-        "SELECT name, filename, uploaded_at FROM horarios.people WHERE group_id = ? ORDER BY key",
+        "SELECT p.name, p.filename, p.uploaded_at, "
+        "  (SELECT COUNT(*) FROM horarios.blocks b "
+        "   WHERE b.person_id = p.id AND b.kind = 'trabajo') AS work_blocks "
+        "FROM horarios.people p WHERE p.group_id = ? ORDER BY p.key",
         (group_id,),
     )
 
@@ -252,11 +287,11 @@ def get_person(c: Conn, group_id: int, name: str) -> dict | None:
     if not rows:
         return None
     blocks = c.query(
-        'SELECT day, start_min AS start, end_min AS "end", subject, room, tags '
+        'SELECT id, day, start_min AS start, end_min AS "end", subject, room, tags, kind '
         "FROM horarios.blocks WHERE person_id = ?",
         (rows[0]["id"],),
     )
-    return {"name": rows[0]["name"], "blocks": blocks}
+    return {"id": rows[0]["id"], "name": rows[0]["name"], "blocks": blocks}
 
 
 def delete_all_people(c: Conn, group_id: int) -> int:

@@ -356,3 +356,93 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .rows li .btn { flex: 0 0 auto; }
+
+/* --- vista semanal (rejilla tipo PDF) ----------------------------------- */
+
+.viewbar { display: flex; gap: 4px; margin-bottom: 14px; }
+.viewbar button {
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 14px;
+}
+.viewbar button[aria-selected="true"] {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600;
+}
+
+.week {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px 14px; box-shadow: var(--shadow); overflow-x: auto;
+}
+.week-grid { display: grid; grid-template-columns: 52px repeat(5, minmax(96px, 1fr)); }
+.week-head {
+  font: 600 13px/1 var(--body); color: var(--muted); text-align: center;
+  padding: 0 4px 8px; border-bottom: 1px solid var(--line);
+}
+.week-head.today { color: var(--accent); }
+
+.hours { position: relative; border-right: 1px solid var(--line); }
+.hours b {
+  position: absolute; right: 6px; transform: translateY(-50%);
+  font: 500 11px/1 var(--mono); color: var(--muted);
+}
+
+.daycol {
+  position: relative; border-right: 1px solid var(--line-soft);
+  /* Las líneas de hora se dibujan de fondo, como la rejilla del horario impreso. */
+  background-image: repeating-linear-gradient(
+    to bottom, var(--line-soft) 0 1px, transparent 1px var(--hour-px));
+}
+.daycol:last-child { border-right: 0; }
+
+.wblock {
+  position: absolute; left: 3px; right: 3px; border-radius: 5px; overflow: hidden;
+  background: var(--accent); color: var(--accent-ink); border: 0; cursor: pointer;
+  padding: 3px 5px; text-align: left; display: block;
+}
+.wblock:hover { filter: brightness(1.1); }
+.wblock b { display: block; font: 500 11px/1.25 var(--mono); }
+.wblock span { display: block; font-size: 11px; line-height: 1.3; opacity: .92; }
+/* Rayas para el tramo en el que todo el mundo está trabajando, no en clase. */
+.wblock.work {
+  background-image: repeating-linear-gradient(
+    45deg, rgba(255,255,255,.22) 0 5px, transparent 5px 10px);
+}
+.wnow { position: absolute; left: 0; right: 0; height: 2px; background: var(--bad); }
+
+.weekend-note { margin: 10px 2px 0; font-size: 13px; color: var(--muted); }
+
+/* Marca de «está trabajando» en la lista de nombres. */
+.chip.work::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px;
+  border-radius: 50%; background: var(--free); vertical-align: middle;
+}
+
+/* --- horario laboral en el panel ---------------------------------------- */
+
+.work-list { list-style: none; margin: 0 0 12px; padding: 0; font-size: 14px; }
+.work-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 0; border-top: 1px solid var(--line-soft);
+}
+.work-list li:first-child { border-top: 0; }
+.work-list .w { flex: 1 1 auto; }
+.work-list .w b { font: 500 13px/1.4 var(--mono); display: block; }
+.work-list .w span { color: var(--muted); font-size: 13px; }
+.work-list button { padding: 3px 9px; font-size: 13px; }
+.three { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; }
+
+@media (max-width: 620px) {
+  .three { grid-template-columns: 1fr 1fr; }
+  .week-grid { grid-template-columns: 42px repeat(5, minmax(72px, 1fr)); }
+  /* En columnas estrechas los nombres se cortarían a media palabra: solo el número. */
+  .wblock span { display: none; }
+}
+
+/* Leyenda de la rejilla semanal. Los selectores repiten .track-head porque si no
+   pierden en especificidad contra la regla general de la leyenda. */
+.track-head .legend .w::before {
+  background-image: repeating-linear-gradient(
+    45deg, rgba(255,255,255,.55) 0 3px, transparent 3px 6px);
+}
+.track-head .legend .empty-key::before {
+  background: var(--card); box-shadow: inset 0 0 0 1px var(--line);
+}

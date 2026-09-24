@@ -13,6 +13,7 @@ const S = {
   slug: null,
   week: [],
   roster: [],
+  view: "semana",   // "semana" (rejilla L-V) o "dia"
   day: todayIndex(),
   query: "",
   report: null,
@@ -264,16 +265,120 @@ function body(error) {
     return out;
   }
 
+  out.push(viewBar());
+  if (S.view === "semana") {
+    out.push(weekGrid());
+    return out;
+  }
+
   out.push(dayTabs());
   const segments = S.week[S.day]?.segments || [];
   if (!segments.length) {
     out.push(el("div", { className: "empty" },
-      el("strong", { textContent: `Nadie tiene clase el ${DAYS[S.day].toLowerCase()}` }),
+      el("strong", { textContent: `Nadie está ocupado el ${DAYS[S.day].toLowerCase()}` }),
       "Todo el día está libre para reunirse."));
   } else {
     out.push(track(segments), ...segments.map((s, i) => segmentRow(s, i)));
   }
   return out;
+}
+
+function viewBar() {
+  return el("div", { className: "viewbar", role: "tablist", ariaLabel: "Vista" },
+    ...[["semana", "Semana"], ["dia", "Por día"]].map(([id, label]) =>
+      el("button", {
+        type: "button", role: "tab", textContent: label,
+        ariaSelected: String(S.view === id),
+        onclick: () => { S.view = id; render(); },
+      })));
+}
+
+/** Rejilla semanal de lunes a viernes, como la tabla del horario impreso. */
+function weekGrid() {
+  const DIAS = [0, 1, 2, 3, 4];                       // sábado y domingo quedan fuera
+  const segs = DIAS.flatMap((d) => S.week[d]?.segments || []);
+  if (!segs.length) {
+    return el("div", { className: "empty" },
+      el("strong", { textContent: "Nadie está ocupado de lunes a viernes" }),
+      "Toda la semana está libre para reunirse.");
+  }
+
+  const from = Math.floor(Math.min(...segs.map((s) => s.start)) / 60) * 60;
+  const to = Math.ceil(Math.max(...segs.map((s) => s.end)) / 60) * 60;
+  const PPH = 46;                                     // píxeles por hora
+  const alto = ((to - from) / 60) * PPH;
+  const y = (min) => ((min - from) / 60) * PPH;
+
+  const grid = el("div", { className: "week-grid" });
+  grid.append(el("div", { className: "week-head" }));
+  DIAS.forEach((d) => grid.append(el("div", {
+    className: d === todayIndex() ? "week-head today" : "week-head",
+    textContent: DAYS[d],
+  })));
+
+  const horas = el("div", { className: "hours" });
+  horas.style.height = `${alto}px`;
+  for (let h = from / 60; h <= to / 60; h++) {
+    const marca = el("b", { textContent: hourLabel(h) });
+    marca.style.top = `${y(h * 60)}px`;
+    horas.append(marca);
+  }
+  grid.append(horas);
+
+  DIAS.forEach((d) => {
+    const col = el("div", { className: "daycol" });
+    col.style.height = `${alto}px`;
+    col.style.setProperty("--hour-px", `${PPH}px`);
+    (S.week[d]?.segments || []).forEach((seg) => {
+      const alturaPx = y(seg.end) - y(seg.start);
+      const todosTrabajan = seg.working.length === seg.people.length;
+      const b = el("button", {
+        type: "button",
+        className: todosTrabajan ? "wblock work" : "wblock",
+        title: `${DAYS[d]} ${fmtRange(seg.start, seg.end)}\n${seg.people.join(", ")}`,
+        onclick: () => { S.view = "dia"; S.day = d; render(); },
+      }, el("b", { textContent: `${seg.people.length}` }));
+      // Los nombres solo cuando el bloque es lo bastante alto para leerlos.
+      if (alturaPx >= 34) {
+        b.append(el("span", {
+          textContent: seg.people.length <= 3
+            ? seg.people.join(", ")
+            : `${seg.people.slice(0, 2).join(", ")} y ${seg.people.length - 2} más`,
+        }));
+      }
+      b.style.top = `${y(seg.start)}px`;
+      b.style.height = `${Math.max(alturaPx - 2, 14)}px`;
+      col.append(b);
+    });
+    if (d === todayIndex()) {
+      const ahora = minutesNow();
+      if (ahora >= from && ahora <= to) {
+        const linea = el("div", { className: "wnow" });
+        linea.style.top = `${y(ahora)}px`;
+        col.append(linea);
+      }
+    }
+    grid.append(col);
+  });
+
+  const finde = [5, 6].filter((d) => (S.week[d]?.segments || []).length);
+  const hayTrabajo = segs.some((sg) => sg.working.length);
+  const cabecera = el("div", { className: "track-head" },
+    el("h2", { textContent: `Lunes a viernes · ${fmt(from)} a ${fmt(to)}` }),
+    el("div", { className: "legend" },
+      el("i", {}, "ocupado"),
+      hayTrabajo ? el("i", { className: "w" }, "trabajando") : null,
+      el("i", { className: "empty-key" }, "libre")));
+
+  return el("section", { className: "week" }, cabecera, grid,
+    finde.length
+      ? el("p", { className: "weekend-note" },
+        `Hay gente ocupada también el ${finde.map((d) => DAYS[d].toLowerCase()).join(" y el ")}. `,
+        el("button", {
+          className: "link", type: "button", textContent: "Verlo por día",
+          onclick: () => { S.view = "dia"; S.day = finde[0]; render(); },
+        }))
+      : null);
 }
 
 function dayTabs() {
@@ -367,14 +472,16 @@ function segmentRow(s, i) {
   const row = el("article", { className: "seg", id: `seg-${i}` },
     el("div", { className: "when" }, fmtRange(s.start, s.end),
       el("span", { className: "count", textContent: people(s.people.length) })),
-    el("div", { className: "who" }, ...s.people.map(chip)));
+    el("div", { className: "who" }, ...s.people.map((n) => chip(n, s.working.includes(n)))));
   row.style.animationDelay = `${Math.min(i, 8) * 30}ms`;
   return row;
 }
 
-function chip(name) {
+function chip(name, working = false) {
   return el("button", {
-    className: "chip", type: "button", onclick: () => openPerson(name),
+    className: working ? "chip work" : "chip", type: "button",
+    title: working ? `${name} está trabajando` : name,
+    onclick: () => openPerson(name),
   }, highlight(name, S.query));
 }
 
@@ -395,7 +502,8 @@ function searchResults() {
     segs.forEach((s) => out.push(el("article", { className: "seg" },
       el("div", { className: "when" }, fmtRange(s.start, s.end),
         el("span", { className: "count", textContent: people(s.people.length) })),
-      el("div", { className: "who" }, ...s.people.map(chip)))));
+      el("div", { className: "who" },
+        ...s.people.map((n) => chip(n, s.working.includes(n)))))));
   });
   return out;
 }
@@ -496,7 +604,7 @@ async function openPerson(name) {
   } catch (err) {
     return openPanel(...panelHead(name, null, el("p", { className: "note err", textContent: err.message })));
   }
-  const total = p.days.reduce((n, d) => n + d.blocks.length, 0);
+  const clases = p.days.reduce((n, d) => n + d.blocks.filter((b) => b.kind !== "trabajo").length, 0);
   const days = p.days.map((d) =>
     el("section", { className: "pday" },
       el("h3", { textContent: DAYS[d.day] }),
@@ -505,6 +613,8 @@ async function openPerson(name) {
         el("tr", {},
           el("td", { textContent: `${fmt(b.start)} – ${fmt(b.end)}` }),
           el("td", {},
+            b.kind === "trabajo" ? el("span", { className: "tag", textContent: "trabajo" }) : null,
+            b.kind === "trabajo" ? " " : null,
             b.subject,
             b.tags ? el("span", { className: "tag", textContent: b.tags.split("").join(" ") }) : null,
             b.room ? el("div", { className: "room", textContent: b.room }) : null)))))));
@@ -521,7 +631,69 @@ async function openPerson(name) {
     })
     : null;
 
-  openPanel(...panelHead(p.name, `${total} bloques de clase en ${p.days.length} días`), ...days, remove);
+  const resumen = [
+    clases ? `${clases} bloques de clase` : "sin clases",
+    p.works ? "y horario de trabajo" : null,
+  ].filter(Boolean).join(" ");
+
+  openPanel(
+    ...panelHead(p.name, resumen),
+    isAdmin() ? workSection(p) : null,
+    ...days,
+    remove);
+}
+
+/** Horario laboral de una persona: añadir franjas y quitarlas. */
+function workSection(p) {
+  const bloques = p.days.flatMap((d) =>
+    d.blocks.filter((b) => b.kind === "trabajo").map((b) => ({ ...b, day: d.day })));
+  const note = el("div");
+
+  const lista = bloques.length
+    ? el("ul", { className: "work-list" }, ...bloques.map((b) =>
+      el("li", {},
+        el("div", { className: "w" },
+          el("b", { textContent: `${DAYS[b.day]}, ${fmt(b.start)} – ${fmt(b.end)}` }),
+          b.room ? el("span", { textContent: b.room }) : null),
+        el("button", {
+          className: "btn btn-danger", type: "button", textContent: "Quitar",
+          onclick: async () => {
+            await api.deleteWork(S.slug, b.id, p.name);
+            await load();
+            openPerson(p.name);
+          },
+        }))))
+    : el("p", { className: "sub", textContent: "No tiene horario de trabajo registrado." });
+
+  const day = el("select", {}, ...DAYS.map((d, i) => el("option", { value: String(i), textContent: d })));
+  const desde = el("input", { type: "time", required: true, value: "14:00" });
+  const hasta = el("input", { type: "time", required: true, value: "18:00" });
+  const lugar = el("input", { type: "text", placeholder: "Dónde (opcional)" });
+
+  const form = el("form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        await api.addWork(S.slug, {
+          name: p.name, day: Number(day.value),
+          start: desde.value, end: hasta.value, place: lugar.value,
+        });
+        await load();
+        openPerson(p.name);
+      } catch (err) {
+        clear(note).append(el("p", { className: "note err", textContent: err.message }));
+      }
+    },
+  },
+    el("div", { className: "three" },
+      el("label", { className: "field" }, el("span", { textContent: "Día" }), day),
+      el("label", { className: "field" }, el("span", { textContent: "Entra" }), desde),
+      el("label", { className: "field" }, el("span", { textContent: "Sale" }), hasta)),
+    el("label", { className: "field" }, el("span", { textContent: "Lugar" }), lugar),
+    el("button", { className: "btn btn-primary", type: "submit", textContent: "Añadir franja de trabajo" }));
+
+  return el("div", { className: "form-card" },
+    el("h3", { textContent: "Trabajo" }), note, lista, form);
 }
 
 // --- ajustes --------------------------------------------------------------
@@ -586,10 +758,34 @@ function schedulesView() {
   const aviso = (texto, clase) =>
     clear(note).append(el("p", { className: `note ${clase}`, textContent: texto }));
 
+  // Alta de alguien que no tiene PDF pero sí horario laboral.
+  const nombre = el("input", { type: "text", required: true, placeholder: "Nombre y apellido" });
+  const altaTrabajo = el("div", { className: "form-card" },
+    el("h3", { textContent: "Añadir a alguien que solo trabaja" }),
+    el("p", { className: "sub", textContent: "Sin PDF. Después le pones sus franjas desde su ficha." }),
+    el("form", {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const quien = nombre.value.trim();
+        if (!quien) return;
+        try {
+          await api.addWork(S.slug, { name: quien, day: 0, start: "08:00", end: "12:00" });
+          await load();
+          closePanel();
+          openPerson(quien);
+        } catch (err) {
+          aviso(err.message, "err");
+        }
+      },
+    },
+      el("label", { className: "field" }, el("span", { textContent: "Nombre" }), nombre),
+      el("button", { className: "btn btn-primary", type: "submit", textContent: "Crear y abrir su ficha" })));
+
   if (!S.roster.length) {
-    return box.append(el("div", { className: "empty" },
-      el("strong", { textContent: "No hay horarios que borrar" }),
+    box.append(el("div", { className: "empty" },
+      el("strong", { textContent: "No hay horarios todavía" }),
       "Sube los PDF desde la pantalla principal."));
+    return box.append(altaTrabajo);
   }
 
   const fecha = (segundos) =>
@@ -601,7 +797,10 @@ function schedulesView() {
       el("li", {},
         el("div", { className: "who-n" },
           el("b", { textContent: p.name }),
-          el("span", { textContent: `${p.filename} · subido el ${fecha(p.uploaded_at)}` })),
+          el("span", { textContent: p.filename
+            ? `${p.filename} · subido el ${fecha(p.uploaded_at)}`
+            : "solo horario de trabajo" })),
+        p.work_blocks ? el("span", { className: "role", textContent: "trabaja" }) : null,
         el("button", {
           className: "btn btn-danger", type: "button", textContent: "Eliminar",
           onclick: async () => {
@@ -615,6 +814,7 @@ function schedulesView() {
             }
           },
         })))),
+    altaTrabajo,
     el("div", { className: "form-card" },
       el("h3", { textContent: "Vaciar la agrupación" }),
       el("p", { className: "sub", textContent: "Borra los horarios de todo el mundo de una vez. No se puede deshacer." }),

@@ -70,7 +70,8 @@ create table if not exists horarios.blocks (
   end_min integer not null,
   subject text not null,
   room text not null,
-  tags text not null
+  tags text not null,
+  kind text not null default 'clase'      -- 'clase' (del PDF) o 'trabajo' (a mano)
 );
 create index if not exists blocks_person_idx on horarios.blocks(person_id);
 

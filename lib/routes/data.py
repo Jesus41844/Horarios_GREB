@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from .. import repo
 from ..db import Conn
@@ -13,6 +14,24 @@ from ..schedule import build_week, merge_ranges
 router = APIRouter(prefix="/g/{slug}", tags=["horarios"])
 
 MAX_PDF_BYTES = 4 * 1024 * 1024  # Vercel limita cada petición a ~4,5 MB
+
+
+class WorkIn(BaseModel):
+    name: str            # a quién; si no existe en la agrupación, se crea
+    day: int             # 0 = lunes ... 6 = domingo
+    start: str           # "14:00"
+    end: str             # "18:30"
+    place: str = ""
+
+
+def _minutes(hhmm: str) -> int:
+    try:
+        h, m = (int(x) for x in hhmm.split(":"))
+    except ValueError:
+        raise HTTPException(400, f"Hora no válida: «{hhmm}». Usa el formato 14:30.")
+    if not (0 <= h < 24 and 0 <= m < 60):
+        raise HTTPException(400, f"Hora fuera de rango: «{hhmm}».")
+    return h * 60 + m
 
 
 @router.post("/upload")
@@ -81,7 +100,42 @@ def person(name: str, access: Access = Depends(group_access), c: Conn = Depends(
         bs = [b for b in blocks if b["day"] == d]
         if bs:
             days.append({"day": d, "ranges": merge_ranges(bs), "blocks": bs})
-    return {"name": p["name"], "days": days}
+    return {
+        "name": p["name"],
+        "days": days,
+        "works": any(b["kind"] == "trabajo" for b in blocks),
+    }
+
+
+@router.post("/work")
+def add_work(body: WorkIn, access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+    """Añade una franja de trabajo. Si la persona no está todavía, la crea sin PDF."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Falta el nombre de la persona.")
+    if not 0 <= body.day <= 6:
+        raise HTTPException(400, "Día no válido.")
+    start, end = _minutes(body.start), _minutes(body.end)
+    if start >= end:
+        raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
+
+    pid = repo.person_id(c, access.group["id"], name)
+    creada = pid is None
+    if creada:
+        pid = repo.create_person(c, access.group["id"], name)
+    block_id = repo.add_work_block(c, pid, body.day, start, end, body.place.strip())
+    c.commit()
+    return {"id": block_id, "name": name, "created": creada}
+
+
+@router.delete("/work/{block_id}")
+def delete_work(block_id: int, name: str,
+                access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+    pid = repo.person_id(c, access.group["id"], name)
+    if pid is None or not repo.delete_block(c, pid, block_id):
+        raise HTTPException(404, "Esa franja de trabajo no existe.")
+    c.commit()
+    return {"deleted": block_id}
 
 
 @router.delete("/people")

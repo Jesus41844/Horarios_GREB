@@ -30,12 +30,29 @@ def migrate() -> None:
     print("Esquema `horarios` aplicado.")
 
 
-def create_user(email: str, name: str, superadmin: bool) -> None:
+def _quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def create_user(email: str, name: str, superadmin: bool, sql_only: bool = False) -> None:
     password = os.environ.get("HORARIOS_PASSWORD") or getpass.getpass("Contraseña: ")
     if len(password) < security.MIN_PASSWORD:
         sys.exit(f"La contraseña necesita al menos {security.MIN_PASSWORD} caracteres.")
+    email = email.strip().lower()
+
+    if sql_only:
+        # Para redes que bloquean el puerto de Postgres: el hash se calcula aquí
+        # y el INSERT se pega en el SQL Editor, que va por HTTPS.
+        print(
+            "-- Pega esto en el SQL Editor de Supabase:\n"
+            "insert into horarios.users (email, name, password_hash, is_superadmin, created_at)\n"
+            f"values ({_quote(email)}, {_quote(name)}, "
+            f"{_quote(security.hash_password(password))}, {int(superadmin)}, "
+            "extract(epoch from now())::bigint);"
+        )
+        return
+
     with connect() as c:
-        email = email.strip().lower()
         if repo.user_by_email(c, email):
             sys.exit(f"Ya existe una cuenta con {email}.")
         repo.create_user(c, email, name, password, superadmin)
@@ -61,13 +78,15 @@ def main() -> None:
     u.add_argument("email")
     u.add_argument("name")
     u.add_argument("--superadmin", action="store_true")
+    u.add_argument("--sql", action="store_true",
+                   help="No conecta: imprime el INSERT para pegarlo en el SQL Editor")
     g = sub.add_parser("create-group")
     g.add_argument("name")
     a = p.parse_args()
     if a.cmd == "migrate":
         migrate()
     elif a.cmd == "create-user":
-        create_user(a.email, a.name, a.superadmin)
+        create_user(a.email, a.name, a.superadmin, a.sql)
     else:
         create_group(a.name)
 

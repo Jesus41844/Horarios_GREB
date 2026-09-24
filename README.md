@@ -56,6 +56,8 @@ tests/             pruebas de la API
    ```
    python -m scripts.manage create-user tu@correo.com "Tu Nombre" --superadmin
    ```
+   Si tu red bloquea el puerto de Postgres (5432/6543), añade `--sql`: no conecta,
+   calcula el hash en local e imprime el `INSERT` para pegarlo en el SQL Editor.
 3. **Vercel**: importa el repo y define `DATABASE_URL`. Despliega con `vercel --prod`.
 
 Desde la web, el superadmin crea las agrupaciones (GREB, Eurus…) y cada admin añade a su gente.

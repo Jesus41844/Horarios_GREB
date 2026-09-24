@@ -259,3 +259,49 @@ def test_admin_de_grupo_no_ve_ni_aprueba_solicitudes(client):
     assert client.get("/api/requests").status_code == 403
     assert client.post("/api/requests/1/approve").status_code == 403
     assert "pending" not in client.get("/api/auth/me").json()
+
+
+def test_borrar_horarios_uno_a_uno_y_de_golpe(client):
+    login(client, "greb@x.com")
+    for nombre in ("Juan Pérez", "Ana Gómez", "Luis Ramos"):
+        upload(client, "greb", nombre)
+    assert len(client.get("/api/g/greb/people").json()) == 3
+
+    # Uno a uno, sin tildes ni mayúsculas.
+    assert client.delete("/api/g/greb/person", params={"name": "juan perez"}).status_code == 200
+    assert client.delete("/api/g/greb/person", params={"name": "juan perez"}).status_code == 404
+    assert len(client.get("/api/g/greb/people").json()) == 2
+
+    # De golpe.
+    assert client.delete("/api/g/greb/people").json() == {"deleted": 2}
+    assert client.get("/api/g/greb/people").json() == []
+    assert all(not d["segments"] for d in client.get("/api/g/greb/schedule").json())
+
+    from lib.db import connect
+    with connect() as c:  # los bloques caen con la persona
+        assert c.query("SELECT COUNT(*) AS n FROM horarios.blocks")[0]["n"] == 0
+
+
+def test_borrado_masivo_solo_afecta_a_su_agrupacion(client):
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    client.post("/api/auth/logout")
+    login(client, "eurus@x.com")
+    upload(client, "eurus", "Pedro Ruiz")
+
+    assert client.delete("/api/g/eurus/people").json() == {"deleted": 1}
+    assert client.delete("/api/g/greb/people").status_code == 404   # ajena: ni existe
+
+    client.post("/api/auth/logout")
+    login(client, "greb@x.com")
+    assert [p["name"] for p in client.get("/api/g/greb/people").json()] == ["Juan Pérez"]
+
+
+def test_miembro_no_puede_vaciar_la_agrupacion(client):
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    client.post("/api/auth/logout")
+
+    login(client, "ve@x.com")            # miembro, no admin
+    assert client.delete("/api/g/greb/people").status_code == 403
+    assert len(client.get("/api/g/greb/people").json()) == 1

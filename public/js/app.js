@@ -528,7 +528,7 @@ async function openPerson(name) {
 
 function openSettings(tab = "cuenta") {
   const tabs = [["cuenta", "Cuenta"]];
-  if (isAdmin()) tabs.push(["miembros", "Miembros"]);
+  if (isAdmin()) tabs.push(["horarios", "Horarios"], ["miembros", "Miembros"]);
   if (S.user.is_superadmin) {
     tabs.push(["grupos", "Agrupaciones"]);
     tabs.push(["solicitudes", S.pending ? `Solicitudes (${S.pending})` : "Solicitudes"]);
@@ -542,7 +542,8 @@ function openSettings(tab = "cuenta") {
     })));
 
   const views = {
-    cuenta: accountView, miembros: membersView, grupos: groupsView, solicitudes: requestsView,
+    cuenta: accountView, horarios: schedulesView, miembros: membersView,
+    grupos: groupsView, solicitudes: requestsView,
   };
   openPanel(...panelHead("Ajustes", S.user.email), bar, el("div", { id: "settings-body" }));
   views[tab]();
@@ -574,6 +575,65 @@ function accountView() {
         el("label", { className: "field" }, el("span", { textContent: "Contraseña actual" }), current),
         el("label", { className: "field" }, el("span", { textContent: "Nueva contraseña (mín. 8)" }), next),
         el("button", { className: "btn btn-primary", type: "submit", textContent: "Cambiar contraseña" }))));
+}
+
+/** Gestión de horarios: la lista completa, con borrado uno a uno o de golpe. */
+function schedulesView() {
+  const box = settingsBody();
+  const note = el("div");
+  box.append(note);
+
+  const aviso = (texto, clase) =>
+    clear(note).append(el("p", { className: `note ${clase}`, textContent: texto }));
+
+  if (!S.roster.length) {
+    return box.append(el("div", { className: "empty" },
+      el("strong", { textContent: "No hay horarios que borrar" }),
+      "Sube los PDF desde la pantalla principal."));
+  }
+
+  const fecha = (segundos) =>
+    new Date(segundos * 1000).toLocaleDateString("es-PA", { day: "numeric", month: "short" });
+
+  box.append(
+    el("p", { className: "sub", textContent: `${S.roster.length} ${S.roster.length === 1 ? "persona" : "personas"} en ${group().name}. Borrar un horario no borra la cuenta de nadie.` }),
+    el("ul", { className: "rows" }, ...S.roster.map((p) =>
+      el("li", {},
+        el("div", { className: "who-n" },
+          el("b", { textContent: p.name }),
+          el("span", { textContent: `${p.filename} · subido el ${fecha(p.uploaded_at)}` })),
+        el("button", {
+          className: "btn btn-danger", type: "button", textContent: "Eliminar",
+          onclick: async () => {
+            if (!confirm(`¿Eliminar el horario de ${p.name}?`)) return;
+            try {
+              await api.deletePerson(S.slug, p.name);
+              await load();
+              openSettings("horarios");
+            } catch (err) {
+              aviso(err.message, "err");
+            }
+          },
+        })))),
+    el("div", { className: "form-card" },
+      el("h3", { textContent: "Vaciar la agrupación" }),
+      el("p", { className: "sub", textContent: "Borra los horarios de todo el mundo de una vez. No se puede deshacer." }),
+      el("button", {
+        className: "btn btn-danger", type: "button",
+        textContent: `Eliminar los ${S.roster.length} horarios`,
+        onclick: async () => {
+          if (!confirm(`¿Eliminar los ${S.roster.length} horarios de ${group().name}? No se puede deshacer.`)) return;
+          if (!confirm("Confirma otra vez: se borran todos.")) return;
+          try {
+            const r = await api.deleteAllPeople(S.slug);
+            await load();
+            openSettings("horarios");
+            aviso(`Se borraron ${r.deleted} horarios.`, "ok");
+          } catch (err) {
+            aviso(err.message, "err");
+          }
+        },
+      })));
 }
 
 async function membersView() {

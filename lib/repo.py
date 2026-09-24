@@ -259,6 +259,11 @@ def get_person(c: Conn, group_id: int, name: str) -> dict | None:
     return {"name": rows[0]["name"], "blocks": blocks}
 
 
+def delete_all_people(c: Conn, group_id: int) -> int:
+    """Vacía la agrupación. Los bloques caen solos por la clave foránea."""
+    return c.execute("DELETE FROM horarios.people WHERE group_id = ?", (group_id,))
+
+
 def delete_person(c: Conn, group_id: int, name: str) -> bool:
     return c.execute(
         "DELETE FROM horarios.people WHERE group_id = ? AND key = ?", (group_id, norm(name))

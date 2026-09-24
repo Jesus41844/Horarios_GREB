@@ -59,6 +59,8 @@ export const api = {
   people: (slug) => request(`/g/${encodeURIComponent(slug)}/people`),
   person: (slug, name) =>
     request(`/g/${encodeURIComponent(slug)}/person?name=${encodeURIComponent(name)}`),
+  deleteAllPeople: (slug) =>
+    request(`/g/${encodeURIComponent(slug)}/people`, { method: "DELETE" }),
   deletePerson: (slug, name) =>
     request(`/g/${encodeURIComponent(slug)}/person?name=${encodeURIComponent(name)}`, {
       method: "DELETE",

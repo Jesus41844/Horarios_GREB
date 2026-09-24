@@ -84,6 +84,14 @@ def person(name: str, access: Access = Depends(group_access), c: Conn = Depends(
     return {"name": p["name"], "days": days}
 
 
+@router.delete("/people")
+def delete_all_people(access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+    """Borra todos los horarios de la agrupación. La agrupación se queda."""
+    n = repo.delete_all_people(c, access.group["id"])
+    c.commit()
+    return {"deleted": n}
+
+
 @router.delete("/person")
 def delete_person(name: str, access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
     if not repo.delete_person(c, access.group["id"], name):

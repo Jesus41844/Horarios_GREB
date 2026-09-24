@@ -15,6 +15,8 @@ El nombre del archivo es el nombre de la persona: `Juan Pérez.pdf` → Juan Pé
 - **Detalle** — al pulsar un nombre se abre su semana con materia, aula y marcas `(L)`, `(B)`.
 - **Informe de subida** — cada archivo se procesa por separado. Los que fallan salen primero,
   con su nombre exacto y el motivo; uno roto no bloquea a los demás.
+- **Borrar horarios** — Ajustes → Horarios lista a todo el mundo con su archivo y su fecha,
+  para borrar uno a uno o vaciar la agrupación entera. También desde el detalle de la persona.
 
 ## Cuentas y permisos
 

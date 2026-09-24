@@ -401,8 +401,9 @@ button, input, select { font: inherit; color: inherit; }
   padding: 3px 5px; text-align: left; display: block;
 }
 .wblock:hover { filter: brightness(1.1); }
-.wblock b { display: block; font: 500 11px/1.25 var(--mono); }
-.wblock span { display: block; font-size: 11px; line-height: 1.3; opacity: .92; }
+/* «3 · Ana, Juan, Luis» seguido, no el número en una línea y los nombres en otra. */
+.wblock b { font: 600 11px/1.35 var(--mono); }
+.wblock span { font-size: 11px; line-height: 1.35; opacity: .95; }
 /* Rayas para el tramo en el que todo el mundo está trabajando, no en clase. */
 .wblock.work {
   background-image: repeating-linear-gradient(

@@ -343,12 +343,13 @@ function weekGrid() {
         title: `${DAYS[d]} ${fmtRange(seg.start, seg.end)}\n${seg.people.join(", ")}`,
         onclick: () => { S.view = "dia"; S.day = d; render(); },
       }, el("b", { textContent: `${seg.people.length}` }));
-      // Los nombres solo cuando el bloque da de sí para leerlos.
-      if (duracion >= 0.6) {
+      // Cuántos y quiénes, seguido en la misma línea. Los nombres solo cuando el
+      // bloque da de sí: en uno muy corto no cabría ni el número.
+      if (duracion >= 0.35) {
         b.append(el("span", {
-          textContent: seg.people.length <= 3
+          textContent: ` · ${seg.people.length <= 4
             ? seg.people.join(", ")
-            : `${seg.people.slice(0, 2).join(", ")} y ${seg.people.length - 2} más`,
+            : `${seg.people.slice(0, 3).join(", ")} y ${seg.people.length - 3} más`}`,
         }));
       }
       b.style.top = y(seg.start);

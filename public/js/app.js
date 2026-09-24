@@ -34,14 +34,13 @@ async function boot() {
   } catch { /* sin sesión: puede que la instalación esté pendiente */ }
   try {
     const s = await api.setupStatus();
-    if (s.needed && s.enabled) return showSetup();
+    if (s.needed) return showSetup();
   } catch { /* si no se puede consultar, se pide entrar */ }
   showLogin();
 }
 
 /** Primera cuenta: solo aparece mientras no hay ninguna. */
 function showSetup(message) {
-  const token = el("input", { type: "password", required: true, autocomplete: "off" });
   const name = el("input", { type: "text", required: true, autocomplete: "name" });
   const email = el("input", { type: "email", required: true, autocomplete: "username" });
   const pass = el("input", {
@@ -55,14 +54,13 @@ function showSetup(message) {
       submit.disabled = true;
       try {
         enter(await api.setup({
-          token: token.value, name: name.value, email: email.value, password: pass.value,
+          name: name.value, email: email.value, password: pass.value,
         }));
       } catch (err) {
         showSetup(err.message);
       }
     },
   },
-    el("label", { className: "field" }, el("span", { textContent: "Token de instalación" }), token),
     el("label", { className: "field" }, el("span", { textContent: "Tu nombre" }), name),
     el("label", { className: "field" }, el("span", { textContent: "Correo" }), email),
     el("label", { className: "field" }, el("span", { textContent: "Contraseña (mín. 8)" }), pass),
@@ -73,9 +71,9 @@ function showSetup(message) {
     el("div", { className: "login" },
       el("div", { className: "login-card" },
         el("h1", {}, "Primera ", el("span", { textContent: "cuenta" })),
-        el("p", { className: "lede", textContent: "Crea la cuenta principal. Esta pantalla desaparece en cuanto exista." }),
+        el("p", { className: "lede", textContent: "Todavía no hay ninguna cuenta. Crea la tuya y quedarás como administrador." }),
         form)));
-  token.focus();
+  name.focus();
 }
 
 function showLogin(message) {

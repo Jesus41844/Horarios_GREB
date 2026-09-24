@@ -1,15 +1,10 @@
-"""Instalación inicial: crea las tablas y la primera cuenta desde la propia web.
+"""Primera cuenta: crea las tablas y la cuenta principal desde la propia web.
 
 Existe porque la red desde la que se administra puede tener bloqueado el puerto
 de Postgres, mientras que el servidor sí alcanza la base.
 
-Se cierra sola: en cuanto hay una cuenta, deja de funcionar. Además exige el
-token de `SETUP_TOKEN`; si esa variable no está definida, la instalación está
-deshabilitada.
+Se cierra sola: en cuanto existe una cuenta, deja de funcionar para siempre.
 """
-import hmac
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -22,7 +17,6 @@ router = APIRouter(prefix="/setup", tags=["setup"])
 
 
 class SetupIn(BaseModel):
-    token: str
     email: str
     name: str
     password: str
@@ -38,7 +32,7 @@ def _users_table_missing(c: Conn) -> bool:
 
 
 def _needed(c: Conn) -> bool:
-    """Hace falta instalar si no hay tablas o si no hay ninguna cuenta."""
+    """Hace falta si no hay tablas todavía o si no existe ninguna cuenta."""
     if _users_table_missing(c):
         return True
     return c.query("SELECT COUNT(*) AS n FROM horarios.users")[0]["n"] == 0
@@ -46,18 +40,13 @@ def _needed(c: Conn) -> bool:
 
 @router.get("")
 def status(c: Conn = Depends(get_conn)):
-    return {"needed": _needed(c), "enabled": bool(os.environ.get("SETUP_TOKEN"))}
+    return {"needed": _needed(c)}
 
 
 @router.post("")
 def run(body: SetupIn, request: Request, response: Response, c: Conn = Depends(get_conn)):
-    expected = os.environ.get("SETUP_TOKEN")
-    if not expected:
-        raise HTTPException(403, "La instalación está deshabilitada.")
-    if not hmac.compare_digest(body.token.strip().encode(), expected.encode()):
-        raise HTTPException(403, "Token de instalación incorrecto.")
     if not _needed(c):
-        raise HTTPException(409, "Ya hay una cuenta: la instalación está cerrada.")
+        raise HTTPException(409, "Ya existe una cuenta. Entra con tu correo.")
 
     email = body.email.strip().lower()
     if "@" not in email or not body.name.strip():

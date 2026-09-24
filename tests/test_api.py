@@ -170,35 +170,30 @@ def test_borrar_agrupacion_borra_sus_datos(client):
 
 
 def test_setup_crea_primera_cuenta_y_se_cierra(monkeypatch, tmp_path):
-    """La instalación funciona solo mientras no hay cuentas y con el token correcto."""
+    """El alta inicial funciona solo mientras no existe ninguna cuenta."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("HORARIOS_SQLITE", str(tmp_path / "setup.db"))
-    monkeypatch.setenv("SETUP_TOKEN", "token-secreto")
     from api.index import app
     c = TestClient(app)
 
-    assert c.get("/api/setup").json() == {"needed": True, "enabled": True}
-    datos = {"token": "token-secreto", "email": "Jefe@X.com", "name": "Jefe", "password": PW}
+    assert c.get("/api/setup").json() == {"needed": True}
+    datos = {"email": "Jefe@X.com", "name": "Jefe", "password": PW}
 
-    assert c.post("/api/setup", json={**datos, "token": "malo"}).status_code == 403
     assert c.post("/api/setup", json={**datos, "password": "corta"}).status_code == 400
+    assert c.post("/api/setup", json={**datos, "email": "sin-arroba"}).status_code == 400
 
     r = c.post("/api/setup", json=datos)
     assert r.status_code == 200
     assert r.json()["user"] == {"id": 1, "email": "jefe@x.com", "name": "Jefe", "is_superadmin": True}
     assert c.get("/api/auth/me").status_code == 200  # queda la sesión iniciada
 
-    # Ya hay cuenta: la instalación se cierra.
+    # Ya hay cuenta: el alta se cierra para siempre.
     assert c.get("/api/setup").json()["needed"] is False
-    assert c.post("/api/setup", json=datos).status_code == 409
+    assert c.post("/api/setup", json={"email": "otro@x.com", "name": "Otro", "password": PW}).status_code == 409
 
 
-def test_setup_deshabilitado_sin_token(monkeypatch, tmp_path):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.delenv("SETUP_TOKEN", raising=False)
-    monkeypatch.setenv("HORARIOS_SQLITE", str(tmp_path / "sin.db"))
-    from api.index import app
-    c = TestClient(app)
-    assert c.get("/api/setup").json()["enabled"] is False
-    assert c.post("/api/setup", json={
-        "token": "x", "email": "a@b.com", "name": "A", "password": PW}).status_code == 403
+def test_setup_cerrado_cuando_ya_hay_cuentas(client):
+    """Con la base ya poblada, nadie puede colarse como superadmin."""
+    assert client.get("/api/setup").json()["needed"] is False
+    assert client.post("/api/setup", json={
+        "email": "intruso@x.com", "name": "Intruso", "password": PW}).status_code == 409

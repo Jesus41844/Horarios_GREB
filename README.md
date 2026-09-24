@@ -81,9 +81,12 @@ Sin `DATABASE_URL` usa un `data.db` SQLite y crea las tablas solo. Con ella, hab
 - El lector espera la tabla `HORAS × días` de los horarios de la UTP (Crystal Reports), con
   texto seleccionable. Un PDF escaneado se rechaza con ese motivo en vez de adivinar.
 
-## Instalación desde la web
+## Primera cuenta
 
-Si la red desde la que administras bloquea el puerto de Postgres (5432/6543) pero el
-servidor sí alcanza la base, define `SETUP_TOKEN` y abre la web: aparece una pantalla
-para crear las tablas y la primera cuenta. Se cierra sola en cuanto existe una cuenta.
-Después conviene borrar `SETUP_TOKEN`.
+Al abrir la web por primera vez, cuando la base todavía no tiene ninguna cuenta,
+aparece una pantalla para crear la tuya: crea las tablas si faltan y te deja como
+superadmin. **Se cierra sola** en cuanto existe una cuenta, y a partir de ahí las
+demás se crean desde Ajustes → Miembros.
+
+Esto evita depender del puerto de Postgres desde tu máquina: el servidor sí alcanza
+la base aunque tu red bloquee el 5432/6543.

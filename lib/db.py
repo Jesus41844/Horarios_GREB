@@ -16,11 +16,15 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_FILE = ROOT / "db" / "schema.sql"
 MIGRATIONS_FILE = ROOT / "db" / "migrations.sql"
 
-# Centinela: si esta columna falta, la base viene de una versión anterior.
+# Columnas que `migrations.sql` debe haber creado. Si falta alguna, la base viene
+# de una versión anterior y hay que aplicarlas. Al añadir una migración nueva, se
+# añade aquí su columna.
+_ESPERADAS = [("blocks", "kind"), ("groups", "owner_user_id")]
 _SENTINEL = (
-    "SELECT 1 FROM information_schema.columns WHERE table_schema = 'horarios' "
-    "AND table_name = 'blocks' AND column_name = 'kind'"
+    "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'horarios' "
+    "AND (table_name, column_name) IN (" + ", ".join(["(%s, %s)"] * len(_ESPERADAS)) + ")"
 )
+_SENTINEL_ARGS = tuple(x for par in _ESPERADAS for x in par)
 _migrated = False
 # Id fijo del candado: hash() de Python varía entre procesos y no serializaría nada.
 _LOCK_ID = 728411
@@ -86,13 +90,13 @@ def _apply_migrations(url: str) -> None:
     if _migrated:
         return
     with psycopg.connect(url, prepare_threshold=None, connect_timeout=20, autocommit=True) as con:
-        if con.execute(_SENTINEL).fetchone():
+        if con.execute(_SENTINEL, _SENTINEL_ARGS).fetchone()[0] == len(_ESPERADAS):
             _migrated = True
             return
         # Un candado para que dos arranques a la vez no se pisen.
         con.execute("SELECT pg_advisory_lock(%s)", (_LOCK_ID,))
         try:
-            if not con.execute(_SENTINEL).fetchone():
+            if con.execute(_SENTINEL, _SENTINEL_ARGS).fetchone()[0] < len(_ESPERADAS):
                 con.execute(MIGRATIONS_FILE.read_text(encoding="utf-8"))
         finally:
             con.execute("SELECT pg_advisory_unlock(%s)", (_LOCK_ID,))

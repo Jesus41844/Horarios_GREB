@@ -30,7 +30,10 @@ create table if not exists horarios.groups (
   id bigint generated always as identity primary key,
   slug text not null unique,
   name text not null,
-  created_at bigint not null
+  created_at bigint not null,
+  -- Dueño: la cuenta del correo inicial, el primer admin que aprobó el superadmin.
+  -- Es la única que gestiona quién entra, quién sale y quién es admin.
+  owner_user_id bigint references horarios.users(id) on delete set null
 );
 
 create table if not exists horarios.memberships (

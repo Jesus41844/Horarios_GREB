@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from .. import repo, security
 from ..db import Conn
-from ..deps import Access, get_conn, group_admin, superadmin
+from ..deps import Access, get_conn, group_owner, superadmin
 
 router = APIRouter(tags=["groups"])
 
@@ -62,6 +62,8 @@ def approve_request(request_id: int, _: dict = Depends(superadmin), c: Conn = De
     if not req:
         raise HTTPException(404, "Esa solicitud ya no existe.")
     repo.set_member(c, req["group_id"], req["user_id"], "admin")
+    # El primero en ser aprobado se queda como dueño: es el correo inicial.
+    repo.set_owner(c, req["group_id"], req["user_id"])
     repo.delete_request(c, request_id)
     c.commit()
     return {"approved": request_id}
@@ -77,13 +79,14 @@ def reject_request(request_id: int, _: dict = Depends(superadmin), c: Conn = Dep
 
 
 @router.get("/g/{slug}/members")
-def list_members(access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+def list_members(access: Access = Depends(group_owner), c: Conn = Depends(get_conn)):
     return repo.list_members(c, access.group["id"])
 
 
 @router.put("/g/{slug}/members")
-def put_member(body: MemberIn, access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
-    """Añade a la agrupación (o cambia el rol). Si el correo no tiene cuenta, la crea."""
+def put_member(body: MemberIn, access: Access = Depends(group_owner), c: Conn = Depends(get_conn)):
+    """Añade a la agrupación (o cambia el rol). Si el correo no tiene cuenta, la crea.
+    Por defecto entra como miembro, que solo ve; el dueño decide a quién hace admin."""
     email = body.email.strip().lower()
     if "@" not in email:
         raise HTTPException(400, "Correo no válido")
@@ -97,13 +100,17 @@ def put_member(body: MemberIn, access: Access = Depends(group_admin), c: Conn = 
         user_id = repo.create_user(c, email, body.name.strip(), body.password)
     else:
         user_id = user["id"]
+    if user_id == access.group["owner_user_id"] and body.role != "admin":
+        raise HTTPException(409, "La cuenta principal no puede dejar de ser administradora.")
     repo.set_member(c, access.group["id"], user_id, body.role)
     c.commit()
     return {"id": user_id, "email": email, "role": body.role, "created": created}
 
 
 @router.delete("/g/{slug}/members/{user_id}")
-def remove_member(user_id: int, access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+def remove_member(user_id: int, access: Access = Depends(group_owner), c: Conn = Depends(get_conn)):
+    if user_id == access.group["owner_user_id"]:
+        raise HTTPException(409, "La cuenta principal no se puede quitar de su agrupación.")
     if not repo.remove_member(c, access.group["id"], user_id):
         raise HTTPException(404, "Ese usuario no es miembro")
     c.commit()

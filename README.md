@@ -35,11 +35,17 @@ se puede teclear el horario a mano.
 
 | Quién | Puede |
 |---|---|
-| **Superadmin** | Crear y eliminar agrupaciones; las ve todas |
-| **Admin** de una agrupación | Subir y borrar horarios, gestionar sus miembros |
-| **Miembro** | Ver y buscar dentro de su agrupación |
+| **Superadmin** | Crear y eliminar agrupaciones, aprobar solicitudes; las ve todas |
+| **Cuenta principal** de una agrupación | Todo lo de admin, y además es la única que añade, quita y da permisos a la gente |
+| **Admin** | Subir y borrar horarios. No toca a las personas |
+| **Solo ver** | Consultar y buscar dentro de su agrupación |
 
-No hay registro abierto: las cuentas las crea un admin desde Ajustes → Miembros. Una persona
+La cuenta principal es la del **correo inicial**: el primer admin que aprobó el superadmin
+para esa agrupación. No se puede quitar ni degradar. Quien añade a alguien entra como
+**solo ver** por defecto; ascender a admin lo decide únicamente la cuenta principal.
+
+Cualquiera puede pedir acceso desde la web, pero queda esperando a que el superadmin lo
+apruebe. La cuenta principal también puede dar de alta a gente directamente. Una persona
 puede estar en varias agrupaciones. Los datos de cada una están separados: a quien no es
 miembro, la agrupación le responde 404 y ni siquiera sabe que existe.
 

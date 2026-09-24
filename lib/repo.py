@@ -105,8 +105,18 @@ def create_group(c: Conn, slug: str, name: str) -> int:
 
 
 def group_by_slug(c: Conn, slug: str) -> dict | None:
-    rows = c.query("SELECT id, slug, name FROM horarios.groups WHERE slug = ?", (slug,))
+    rows = c.query(
+        "SELECT id, slug, name, owner_user_id FROM horarios.groups WHERE slug = ?", (slug,)
+    )
     return rows[0] if rows else None
+
+
+def set_owner(c: Conn, group_id: int, user_id: int) -> None:
+    """Solo si todavía no tiene dueño: el primer admin aprobado se queda con ella."""
+    c.execute(
+        "UPDATE horarios.groups SET owner_user_id = ? WHERE id = ? AND owner_user_id IS NULL",
+        (user_id, group_id),
+    )
 
 
 def delete_group(c: Conn, slug: str) -> bool:
@@ -114,14 +124,22 @@ def delete_group(c: Conn, slug: str) -> bool:
 
 
 def groups_for_user(c: Conn, user: dict) -> list[dict]:
-    """Superadmin: todas (como admin). El resto: solo aquellas de las que es miembro."""
+    """Superadmin: todas (como admin y con mando). El resto: solo las suyas."""
     if user["is_superadmin"]:
-        return c.query("SELECT id, slug, name, 'admin' AS role FROM horarios.groups ORDER BY name")
-    return c.query(
-        "SELECT g.id, g.slug, g.name, m.role FROM horarios.memberships m "
-        "JOIN horarios.groups g ON g.id = m.group_id WHERE m.user_id = ? ORDER BY g.name",
+        rows = c.query(
+            "SELECT id, slug, name, 'admin' AS role FROM horarios.groups ORDER BY name")
+        for r in rows:
+            r["is_owner"] = True
+        return rows
+    rows = c.query(
+        "SELECT g.id, g.slug, g.name, m.role, g.owner_user_id "
+        "FROM horarios.memberships m JOIN horarios.groups g ON g.id = m.group_id "
+        "WHERE m.user_id = ? ORDER BY g.name",
         (user["id"],),
     )
+    for r in rows:
+        r["is_owner"] = r.pop("owner_user_id") == user["id"]
+    return rows
 
 
 def member_role(c: Conn, group_id: int, user_id: int) -> str | None:
@@ -133,11 +151,17 @@ def member_role(c: Conn, group_id: int, user_id: int) -> str | None:
 
 
 def list_members(c: Conn, group_id: int) -> list[dict]:
-    return c.query(
-        "SELECT u.id, u.email, u.name, m.role FROM horarios.memberships m "
-        "JOIN horarios.users u ON u.id = m.user_id WHERE m.group_id = ? ORDER BY u.name",
+    rows = c.query(
+        "SELECT u.id, u.email, u.name, m.role, g.owner_user_id "
+        "FROM horarios.memberships m "
+        "JOIN horarios.users u ON u.id = m.user_id "
+        "JOIN horarios.groups g ON g.id = m.group_id "
+        "WHERE m.group_id = ? ORDER BY u.name",
         (group_id,),
     )
+    for r in rows:
+        r["is_owner"] = r.pop("owner_user_id") == r["id"]
+    return rows
 
 
 def set_member(c: Conn, group_id: int, user_id: int, role: str) -> None:

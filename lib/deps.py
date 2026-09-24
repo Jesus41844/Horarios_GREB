@@ -56,3 +56,11 @@ def group_admin(access: Access = Depends(group_access)) -> Access:
     if access.role != "admin":
         raise HTTPException(403, "Hace falta ser administrador de la agrupación")
     return access
+
+
+def group_owner(access: Access = Depends(group_access)) -> Access:
+    """La cuenta del correo inicial de la agrupación. Solo ella decide quién entra,
+    quién sale y quién es administrador. El superadmin también pasa."""
+    if not (access.user["is_superadmin"] or access.group["owner_user_id"] == access.user["id"]):
+        raise HTTPException(403, "Solo la cuenta principal de la agrupación puede hacer esto.")
+    return access

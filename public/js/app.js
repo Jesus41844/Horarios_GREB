@@ -24,6 +24,7 @@ const S = {
 
 const group = () => S.groups.find((g) => g.slug === S.slug) || null;
 const isAdmin = () => group()?.role === "admin";
+const isOwner = () => group()?.is_owner === true;
 const remember = (slug) => { try { localStorage.setItem("grupo", slug); } catch { /* modo privado */ } };
 const remembered = () => { try { return localStorage.getItem("grupo"); } catch { return null; } };
 
@@ -830,7 +831,8 @@ function addBlockSection(p) {
 
 function openSettings(tab = "cuenta") {
   const tabs = [["cuenta", "Cuenta"]];
-  if (isAdmin()) tabs.push(["horarios", "Horarios"], ["miembros", "Miembros"]);
+  if (isAdmin()) tabs.push(["horarios", "Horarios"]);
+  if (isOwner()) tabs.push(["miembros", "Miembros"]);
   if (S.user.is_superadmin) {
     tabs.push(["grupos", "Agrupaciones"]);
     tabs.push(["solicitudes", S.pending ? `Solicitudes (${S.pending})` : "Solicitudes"]);
@@ -976,8 +978,8 @@ async function membersView() {
   const name = el("input", { type: "text", placeholder: "Ana Gómez" });
   const pass = el("input", { type: "password", placeholder: "mín. 8 caracteres", autocomplete: "new-password" });
   const role = el("select", {},
-    el("option", { value: "member", textContent: "Miembro — solo ve y busca" }),
-    el("option", { value: "admin", textContent: "Administrador — sube y borra" }));
+    el("option", { value: "member", textContent: "Solo ver — consulta los horarios" }),
+    el("option", { value: "admin", textContent: "Administrar — además sube y borra horarios" }));
 
   const form = el("form", {
     onsubmit: async (e) => {
@@ -1003,25 +1005,45 @@ async function membersView() {
 
   box.append(note, el("div", { className: "form-card" },
     el("h3", { textContent: `Añadir a ${group().name}` }),
-    el("p", { className: "sub", textContent: "Si el correo ya tiene cuenta, basta con el correo." }),
+    el("p", { className: "sub", textContent: "Si el correo ya tiene cuenta, basta con el correo. Gestionar a la gente es cosa tuya: los administradores solo tocan horarios." }),
     form));
 
   try {
     const list = await api.members(S.slug);
-    box.append(el("ul", { className: "rows" }, ...list.map((m) =>
-      el("li", {},
+    box.append(el("ul", { className: "rows" }, ...list.map((m) => {
+      if (m.is_owner) {
+        // La cuenta principal no se toca: ni cambia de rol ni se quita.
+        return el("li", {},
+          el("div", { className: "who-n" },
+            el("b", { textContent: m.name }),
+            el("span", { textContent: m.email })),
+          el("span", { className: "role admin", textContent: "cuenta principal" }));
+      }
+      const rol = el("select", { ariaLabel: `Permisos de ${m.name}` },
+        el("option", { value: "member", textContent: "Solo ver", selected: m.role === "member" }),
+        el("option", { value: "admin", textContent: "Administrar", selected: m.role === "admin" }));
+      rol.onchange = async () => {
+        try {
+          await api.putMember(S.slug, { email: m.email, role: rol.value });
+          membersView();
+        } catch (err) {
+          clear(note).append(el("p", { className: "note err", textContent: err.message }));
+        }
+      };
+      return el("li", {},
         el("div", { className: "who-n" },
           el("b", { textContent: m.name }),
           el("span", { textContent: m.email })),
-        el("span", { className: `role ${m.role}`, textContent: m.role === "admin" ? "admin" : "miembro" }),
-        m.id === S.user.id ? null : el("button", {
+        rol,
+        el("button", {
           className: "btn btn-danger", type: "button", textContent: "Quitar",
           onclick: async () => {
             if (!confirm(`¿Quitar a ${m.name} de ${group().name}?`)) return;
             await api.removeMember(S.slug, m.id);
             membersView();
           },
-        })))));
+        }));
+    })));
   } catch (err) {
     box.append(el("p", { className: "note err", textContent: err.message }));
   }

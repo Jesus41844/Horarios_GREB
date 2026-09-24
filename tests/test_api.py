@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from lib import repo  # noqa: E402
+
 PDF = ROOT / "HorarioClase.pdf"
 PW = "clave-larga-1"
 
@@ -32,6 +34,8 @@ def client(monkeypatch):
             repo.set_member(c, greb, greb_admin, "admin")
             repo.set_member(c, eurus, eurus_admin, "admin")
             repo.set_member(c, greb, viewer, "member")
+            repo.set_owner(c, greb, greb_admin)     # como al aprobar el primer admin
+            repo.set_owner(c, eurus, eurus_admin)
             c.commit()
         assert root
         yield TestClient(app)
@@ -418,3 +422,82 @@ def test_miembro_no_puede_tocar_los_bloques(client):
     assert client.post("/api/g/greb/blocks", json={
         "name": "Otro", "blocks": [_bloque()]}).status_code == 403
     assert client.delete(f"/api/g/greb/block/{bid}", params={"name": "Ana Gómez"}).status_code == 403
+
+
+def test_solo_el_dueno_gestiona_a_la_gente(client):
+    """El correo inicial manda: los demás admins tocan horarios, no personas."""
+    login(client, "greb@x.com")          # dueño de GREB
+    r = client.put("/api/g/greb/members", json={
+        "email": "seg@x.com", "name": "Segundo", "password": PW, "role": "admin"})
+    assert r.json()["created"] is True
+    client.post("/api/auth/logout")
+
+    # Ese segundo admin puede con los horarios...
+    login(client, "seg@x.com")
+    assert upload(client, "greb", "Juan Pérez").json()["ok"] == 1
+    # ...pero no con la gente.
+    assert client.get("/api/g/greb/members").status_code == 403
+    assert client.put("/api/g/greb/members", json={
+        "email": "otro@x.com", "name": "Otro", "password": PW}).status_code == 403
+    assert client.delete("/api/g/greb/members/1").status_code == 403
+
+
+def test_quien_se_anade_entra_como_miembro(client):
+    login(client, "greb@x.com")
+    client.put("/api/g/greb/members", json={
+        "email": "nuevo@x.com", "name": "Nuevo", "password": PW})   # sin rol
+    fila = [m for m in client.get("/api/g/greb/members").json() if m["email"] == "nuevo@x.com"][0]
+    assert fila["role"] == "member" and fila["is_owner"] is False
+    client.post("/api/auth/logout")
+
+    login(client, "nuevo@x.com")
+    assert client.get("/api/g/greb/schedule").status_code == 200   # ve
+    assert upload(client, "greb", "X").status_code == 403          # no sube
+
+
+def test_el_dueno_asciende_y_degrada(client):
+    login(client, "greb@x.com")
+    client.put("/api/g/greb/members", json={
+        "email": "nuevo@x.com", "name": "Nuevo", "password": PW})
+    client.put("/api/g/greb/members", json={"email": "nuevo@x.com", "role": "admin"})
+    fila = [m for m in client.get("/api/g/greb/members").json() if m["email"] == "nuevo@x.com"][0]
+    assert fila["role"] == "admin"
+    client.post("/api/auth/logout")
+
+    login(client, "nuevo@x.com")
+    assert upload(client, "greb", "Juan Pérez").json()["ok"] == 1   # ya sube
+
+
+def test_el_dueno_no_se_puede_quitar_ni_degradar(client):
+    login(client, "greb@x.com")
+    yo = [m for m in client.get("/api/g/greb/members").json() if m["is_owner"]][0]
+    assert yo["email"] == "greb@x.com"
+    assert client.delete(f"/api/g/greb/members/{yo['id']}").status_code == 409
+    assert client.put("/api/g/greb/members", json={
+        "email": "greb@x.com", "role": "member"}).status_code == 409
+
+
+def test_aprobar_una_solicitud_nombra_dueno_solo_la_primera_vez(client):
+    from lib.db import connect
+    with connect() as c:                      # agrupación nueva, todavía sin dueño
+        gid = repo.create_group(c, "nueva", "Nueva")
+        c.commit()
+    assert gid
+
+    primero = TestClient(client.app)
+    primero.post("/api/auth/register", json={
+        "name": "Primero", "email": "uno@x.com", "password": PW, "group": "nueva"})
+    segundo = TestClient(client.app)
+    segundo.post("/api/auth/register", json={
+        "name": "Segundo", "email": "dos@x.com", "password": PW, "group": "nueva"})
+
+    login(client, "root@x.com")
+    pendientes = {r["email"]: r["id"] for r in client.get("/api/requests").json()}
+    client.post(f"/api/requests/{pendientes['uno@x.com']}/approve")   # este se queda la agrupación
+    client.post(f"/api/requests/{pendientes['dos@x.com']}/approve")
+
+    assert [g["is_owner"] for g in primero.get("/api/auth/me").json()["groups"]] == [True]
+    assert [g["is_owner"] for g in segundo.get("/api/auth/me").json()["groups"]] == [False]
+    # El segundo es admin, pero la gente la gestiona el primero.
+    assert segundo.get("/api/g/nueva/members").status_code == 403
+    assert primero.get("/api/g/nueva/members").status_code == 200

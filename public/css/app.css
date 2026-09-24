@@ -470,3 +470,9 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 620px) {
   .ocr-row { grid-template-columns: 58px 1fr 1fr 30px; }
 }
+
+/* La fila de un miembro lleva su selector de permisos junto al botón de quitar. */
+.rows li select {
+  flex: 0 0 auto; padding: 5px 8px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--card);
+}

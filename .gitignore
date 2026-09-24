@@ -5,3 +5,4 @@ data.db
 .vercel/
 *.pdf
 .pytest_cache/
+.vercel

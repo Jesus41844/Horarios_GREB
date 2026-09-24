@@ -32,6 +32,9 @@ async function request(path, { method = "GET", body, json } = {}) {
 }
 
 export const api = {
+  setupStatus: () => request("/setup"),
+  setup: (data) => request("/setup", { method: "POST", json: data }),
+
   me: () => request("/auth/me"),
   login: (email, password) => request("/auth/login", { method: "POST", json: { email, password } }),
   logout: () => request("/auth/logout", { method: "POST" }),

@@ -66,6 +66,19 @@ class Conn:
 
 
 @contextmanager
+def get_conn_raw():
+    """Conexión suelta en autocommit, para aplicar el esquema (los CREATE del DDL)."""
+    url = postgres_url()
+    if not url:
+        raise RuntimeError("Solo aplica a Postgres; SQLite crea sus tablas al conectar.")
+    con = psycopg.connect(url, prepare_threshold=None, connect_timeout=20, autocommit=True)
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+@contextmanager
 def connect():
     """Cierra siempre; lo que no se haya confirmado con commit() se descarta."""
     url = postgres_url()

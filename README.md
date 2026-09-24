@@ -80,3 +80,10 @@ Sin `DATABASE_URL` usa un `data.db` SQLite y crea las tablas solo. Con ella, hab
 - Cada subida va en su propia petición: Vercel limita cada una a ~4,5 MB.
 - El lector espera la tabla `HORAS × días` de los horarios de la UTP (Crystal Reports), con
   texto seleccionable. Un PDF escaneado se rechaza con ese motivo en vez de adivinar.
+
+## Instalación desde la web
+
+Si la red desde la que administras bloquea el puerto de Postgres (5432/6543) pero el
+servidor sí alcanza la base, define `SETUP_TOKEN` y abre la web: aparece una pantalla
+para crear las tablas y la primera cuenta. Se cierra sola en cuanto existe una cuenta.
+Después conviene borrar `SETUP_TOKEN`.

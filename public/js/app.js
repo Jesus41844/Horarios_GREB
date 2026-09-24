@@ -197,6 +197,7 @@ async function load() {
 
 function render(error) {
   clear(root).append(header(), el("main", { className: "wrap" }, ...body(error)));
+  requestAnimationFrame(ajustarRejilla);
 }
 
 function header() {
@@ -308,9 +309,11 @@ function weekGrid() {
 
   const from = Math.floor(Math.min(...segs.map((s) => s.start)) / 60) * 60;
   const to = Math.ceil(Math.max(...segs.map((s) => s.end)) / 60) * 60;
-  const PPH = 46;                                     // píxeles por hora
-  const alto = ((to - from) / 60) * PPH;
-  const y = (min) => ((min - from) / 60) * PPH;
+  // El alto por hora vive en la variable CSS --pph: se pone una estimación y
+  // ajustarRejilla() la corrige midiendo el hueco real, sin volver a dibujar.
+  const cuantasHoras = (to - from) / 60;
+  const alto = `calc(var(--pph) * ${cuantasHoras})`;
+  const y = (min) => `calc(var(--pph) * ${(min - from) / 60})`;
 
   const grid = el("div", { className: "week-grid" });
   grid.append(el("div", { className: "week-head" }));
@@ -320,20 +323,19 @@ function weekGrid() {
   })));
 
   const horas = el("div", { className: "hours" });
-  horas.style.height = `${alto}px`;
+  horas.style.height = alto;
   for (let h = from / 60; h <= to / 60; h++) {
     const marca = el("b", { textContent: hourLabel(h) });
-    marca.style.top = `${y(h * 60)}px`;
+    marca.style.top = y(h * 60);
     horas.append(marca);
   }
   grid.append(horas);
 
   DIAS.forEach((d) => {
     const col = el("div", { className: "daycol" });
-    col.style.height = `${alto}px`;
-    col.style.setProperty("--hour-px", `${PPH}px`);
+    col.style.height = alto;
     (S.week[d]?.segments || []).forEach((seg) => {
-      const alturaPx = y(seg.end) - y(seg.start);
+      const duracion = (seg.end - seg.start) / 60;     // en horas
       const todosTrabajan = seg.working.length === seg.people.length;
       const b = el("button", {
         type: "button",
@@ -341,23 +343,23 @@ function weekGrid() {
         title: `${DAYS[d]} ${fmtRange(seg.start, seg.end)}\n${seg.people.join(", ")}`,
         onclick: () => { S.view = "dia"; S.day = d; render(); },
       }, el("b", { textContent: `${seg.people.length}` }));
-      // Los nombres solo cuando el bloque es lo bastante alto para leerlos.
-      if (alturaPx >= 34) {
+      // Los nombres solo cuando el bloque da de sí para leerlos.
+      if (duracion >= 0.6) {
         b.append(el("span", {
           textContent: seg.people.length <= 3
             ? seg.people.join(", ")
             : `${seg.people.slice(0, 2).join(", ")} y ${seg.people.length - 2} más`,
         }));
       }
-      b.style.top = `${y(seg.start)}px`;
-      b.style.height = `${Math.max(alturaPx - 2, 14)}px`;
+      b.style.top = y(seg.start);
+      b.style.height = `max(14px, calc(var(--pph) * ${duracion} - 2px))`;
       col.append(b);
     });
     if (d === todayIndex()) {
       const ahora = minutesNow();
       if (ahora >= from && ahora <= to) {
         const linea = el("div", { className: "wnow" });
-        linea.style.top = `${y(ahora)}px`;
+        linea.style.top = y(ahora);
         col.append(linea);
       }
     }
@@ -373,7 +375,7 @@ function weekGrid() {
       hayTrabajo ? el("i", { className: "w" }, "trabajando") : null,
       el("i", { className: "empty-key" }, "libre")));
 
-  return el("section", { className: "week" }, cabecera, grid,
+  const seccion = el("section", { className: "week" }, cabecera, grid,
     finde.length
       ? el("p", { className: "weekend-note" },
         `Hay gente ocupada también el ${finde.map((d) => DAYS[d].toLowerCase()).join(" y el ")}. `,
@@ -382,6 +384,25 @@ function weekGrid() {
           onclick: () => { S.view = "dia"; S.day = finde[0]; render(); },
         }))
       : null);
+  seccion.style.setProperty("--pph", "56px");   // estimación; se ajusta al medir
+  seccion.dataset.horas = String(cuantasHoras);
+  return seccion;
+}
+
+/** Estira la rejilla hasta el borde de la ventana, midiendo dónde empieza. */
+function ajustarRejilla() {
+  const week = document.querySelector(".week");
+  const col = week?.querySelector(".daycol");
+  if (!col) return;
+  const horas = Number(week.dataset.horas);
+  const limita = (px) => Math.max(38, Math.min(110, px / horas));
+  const poner = (pph) => week.style.setProperty("--pph", `${pph.toFixed(1)}px`);
+
+  const disponible = window.innerHeight - col.getBoundingClientRect().top - 16;
+  poner(limita(disponible));
+  // Segunda pasada: descuenta lo que quede fuera (márgenes, nota de fin de semana).
+  const sobra = document.documentElement.scrollHeight - window.innerHeight;
+  if (sobra > 1) poner(limita(disponible - sobra));
 }
 
 function dayTabs() {
@@ -707,6 +728,8 @@ function closePanel() {
   scrim.classList.remove("on");
   setTimeout(() => { if (!panel.classList.contains("on")) panel.hidden = true; }, 220);
 }
+
+window.addEventListener("resize", ajustarRejilla);
 
 scrim.addEventListener("click", closePanel);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanel(); });

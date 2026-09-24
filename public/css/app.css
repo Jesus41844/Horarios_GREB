@@ -114,7 +114,7 @@ button, input, select { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--line);
 }
 .top-in {
-  max-width: 1080px; margin: 0 auto; padding: 12px 16px;
+  max-width: 1720px; margin: 0 auto; padding: 12px 20px;
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .brand { font-family: var(--display); font-weight: 800; font-size: 17px; letter-spacing: -.02em; }
@@ -129,7 +129,8 @@ button, input, select { font: inherit; color: inherit; }
 
 /* --- estructura --------------------------------------------------------- */
 
-.wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px 80px; }
+/* En escritorio la rejilla es el contenido principal: que ocupe la pantalla. */
+.wrap { max-width: 1720px; margin: 0 auto; padding: 16px 20px 32px; }
 
 .days { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 18px; }
 .days button {
@@ -152,6 +153,7 @@ button, input, select { font: inherit; color: inherit; }
   margin-bottom: 10px; flex-wrap: wrap;
 }
 .track-head h2 { font-size: 15px; }
+.week .track-head { margin-bottom: 6px; }
 .track-head .legend { font-size: 12px; color: var(--muted); display: flex; gap: 12px; }
 .track-head .legend i { font-style: normal; display: inline-flex; align-items: center; gap: 5px; }
 .track-head .legend i::before {
@@ -232,8 +234,8 @@ button, input, select { font: inherit; color: inherit; }
 
 .drop {
   display: block; border: 2px dashed var(--line); border-radius: var(--radius);
-  background: var(--card); padding: 14px; text-align: center; color: var(--muted);
-  cursor: pointer; margin-bottom: 14px; font-size: 14px;
+  background: var(--card); padding: 9px 14px; text-align: center; color: var(--muted);
+  cursor: pointer; margin-bottom: 10px; font-size: 13px;
   transition: border-color .12s, background .12s, color .12s;
 }
 .drop:hover, .drop.over, .drop:focus-within {
@@ -359,7 +361,7 @@ button, input, select { font: inherit; color: inherit; }
 
 /* --- vista semanal (rejilla tipo PDF) ----------------------------------- */
 
-.viewbar { display: flex; gap: 4px; margin-bottom: 14px; }
+.viewbar { display: flex; gap: 4px; margin-bottom: 10px; }
 .viewbar button {
   border: 1px solid var(--line); background: var(--card); color: var(--muted);
   padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 14px;
@@ -370,9 +372,9 @@ button, input, select { font: inherit; color: inherit; }
 
 .week {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 12px 14px 14px; box-shadow: var(--shadow); overflow-x: auto;
+  padding: 10px 12px 12px; box-shadow: var(--shadow); overflow-x: auto;
 }
-.week-grid { display: grid; grid-template-columns: 52px repeat(5, minmax(96px, 1fr)); }
+.week-grid { display: grid; grid-template-columns: 54px repeat(5, minmax(120px, 1fr)); }
 .week-head {
   font: 600 13px/1 var(--body); color: var(--muted); text-align: center;
   padding: 0 4px 8px; border-bottom: 1px solid var(--line);
@@ -389,7 +391,7 @@ button, input, select { font: inherit; color: inherit; }
   position: relative; border-right: 1px solid var(--line-soft);
   /* Las líneas de hora se dibujan de fondo, como la rejilla del horario impreso. */
   background-image: repeating-linear-gradient(
-    to bottom, var(--line-soft) 0 1px, transparent 1px var(--hour-px));
+    to bottom, var(--line-soft) 0 1px, transparent 1px var(--pph));
 }
 .daycol:last-child { border-right: 0; }
 

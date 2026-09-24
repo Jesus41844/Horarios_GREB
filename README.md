@@ -26,8 +26,9 @@ se puede teclear el horario a mano.
   (Tesseract desde CDN; el servidor de Vercel no tiene el binario). Lo que sale es una
   propuesta editable: no se guarda nada hasta que el admin la revisa. Al guardar reemplaza
   las clases de esa persona y deja intacto su horario de trabajo.
-- **A mano** — desde la ficha de una persona se añade cualquier bloque (clase o trabajo) y se
-  borra cualquiera. Es el respaldo cuando el OCR falla o la imagen es mala.
+- **A mano** — desde la ficha de una persona se añade, **edita** y borra cualquier bloque, da
+  igual si vino de un PDF, de una imagen o se tecleó. Editar permite corregir la hora, el día,
+  la materia, el aula, o convertir una clase en trabajo.
 - **Borrar horarios** — Ajustes → Horarios lista a todo el mundo con su archivo y su fecha,
   para borrar uno a uno o vaciar la agrupación entera. También desde el detalle de la persona.
 
@@ -41,7 +42,8 @@ se puede teclear el horario a mano.
 | **Solo ver** | Consultar y buscar dentro de su agrupación |
 
 La cuenta principal es la del **correo inicial**: el primer admin que aprobó el superadmin
-para esa agrupación. No se puede quitar ni degradar. Quien añade a alguien entra como
+para esa agrupación. No se puede quitar ni degradar. El superadmin puede reasignarla desde
+Ajustes → Agrupaciones, que también sirve para las agrupaciones creadas antes de esta regla. Quien añade a alguien entra como
 **solo ver** por defecto; ascender a admin lo decide únicamente la cuenta principal.
 
 Cualquiera puede pedir acceso desde la web, pero queda esperando a que el superadmin lo

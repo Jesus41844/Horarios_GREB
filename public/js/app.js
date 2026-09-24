@@ -18,6 +18,7 @@ const S = {
   day: todayIndex(),
   query: "",
   report: null,
+  flash: null,    // aviso que debe sobrevivir a un redibujado del panel
   pending: 0,     // solicitudes por aprobar (solo superadmin)
   waiting: null,  // agrupaciones que esta cuenta pidió y aún no le aprueban
 };
@@ -742,15 +743,22 @@ async function openPerson(name) {
             b.tags ? el("span", { className: "tag", textContent: b.tags.split("").join(" ") }) : null,
             b.room ? el("div", { className: "room", textContent: b.room }) : null),
           isAdmin()
-            ? el("td", { className: "del" }, el("button", {
-              className: "btn btn-danger", type: "button", textContent: "×",
-              ariaLabel: `Quitar ${b.subject}`,
-              onclick: async () => {
-                await api.deleteBlock(S.slug, b.id, p.name);
-                await load();
-                openPerson(p.name);
-              },
-            }))
+            ? el("td", { className: "del" },
+              el("button", {
+                className: "btn", type: "button", textContent: "✎",
+                ariaLabel: `Editar ${b.subject}`,
+                onclick: (e) => editarBloque(e.target.closest("tr"), b, p.name),
+              }),
+              el("button", {
+                className: "btn btn-danger", type: "button", textContent: "×",
+                ariaLabel: `Quitar ${b.subject}`,
+                onclick: async () => {
+                  if (!confirm(`¿Quitar «${b.subject}» de ${DAYS[d.day]}?`)) return;
+                  await api.deleteBlock(S.slug, b.id, p.name);
+                  await load();
+                  openPerson(p.name);
+                },
+              }))
             : null))))));
 
   const remove = isAdmin()
@@ -775,6 +783,49 @@ async function openPerson(name) {
     isAdmin() ? addBlockSection(p) : null,
     ...days,
     remove);
+}
+
+/** Convierte una fila del horario en un formulario para corregirla. */
+function editarBloque(fila, b, nombre) {
+  const tipo = el("select", { ariaLabel: "Tipo" },
+    el("option", { value: "clase", textContent: "Clase", selected: b.kind !== "trabajo" }),
+    el("option", { value: "trabajo", textContent: "Trabajo", selected: b.kind === "trabajo" }));
+  const dia = el("select", { ariaLabel: "Día" }, ...DAYS.map((d, n) =>
+    el("option", { value: String(n), textContent: d.slice(0, 3), selected: n === b.day })));
+  const desde = el("input", { type: "time", value: hhmm(b.start), ariaLabel: "Entra" });
+  const hasta = el("input", { type: "time", value: hhmm(b.end), ariaLabel: "Sale" });
+  const materia = el("input", { type: "text", value: b.subject, placeholder: "Materia", ariaLabel: "Materia" });
+  const aula = el("input", { type: "text", value: b.room, placeholder: "Aula o lugar", ariaLabel: "Aula" });
+  const aviso = el("div");
+
+  const edicion = el("tr", {}, el("td", { colSpan: 3 },
+    el("div", { className: "edit-box" },
+      aviso,
+      el("div", { className: "ocr-row" }, dia, desde, hasta, el("span"), materia, aula),
+      el("div", { className: "two" },
+        el("button", {
+          className: "btn btn-primary", type: "button", textContent: "Guardar",
+          onclick: async () => {
+            try {
+              await api.updateBlock(S.slug, b.id, nombre, {
+                day: Number(dia.value), start: desde.value, end: hasta.value,
+                subject: materia.value, room: aula.value, kind: tipo.value,
+              });
+              await load();
+              openPerson(nombre);
+            } catch (err) {
+              clear(aviso).append(el("p", { className: "note err", textContent: err.message }));
+            }
+          },
+        }),
+        el("button", {
+          className: "btn", type: "button", textContent: "Cancelar",
+          onclick: () => { edicion.replaceWith(fila); },
+        })),
+      el("label", { className: "field" }, el("span", { textContent: "Tipo" }), tipo))));
+
+  fila.replaceWith(edicion);
+  materia.focus();
 }
 
 /** Añadir un bloque a mano: una clase (cuando solo hay una imagen) o trabajo. */
@@ -853,7 +904,14 @@ function openSettings(tab = "cuenta") {
   views[tab]();
 }
 
-const settingsBody = () => clear(document.getElementById("settings-body"));
+function settingsBody() {
+  const box = clear(document.getElementById("settings-body"));
+  if (S.flash) {
+    box.append(el("p", { className: `note ${S.flash.tipo}`, textContent: S.flash.texto }));
+    S.flash = null;   // se enseña una vez y se va
+  }
+  return box;
+}
 
 function accountView() {
   const current = el("input", { type: "password", required: true, autocomplete: "current-password" });
@@ -1101,7 +1159,7 @@ async function requestsView() {
       })))));
 }
 
-function groupsView() {
+async function groupsView() {
   const box = settingsBody();
   const note = el("div");
   const name = el("input", { type: "text", required: true, placeholder: "Eurus" });
@@ -1113,7 +1171,7 @@ function groupsView() {
         e.preventDefault();
         try {
           const g = await api.createGroup(name.value);
-          clear(note).append(el("p", { className: "note ok", textContent: `Agrupación «${g.name}» creada.` }));
+          S.flash = { tipo: "ok", texto: `Agrupación «${g.name}» creada.` };
           e.target.reset();
           enter(await api.me());
           openSettings("grupos");
@@ -1124,16 +1182,58 @@ function groupsView() {
     },
       el("label", { className: "field" }, el("span", { textContent: "Nombre" }), name),
       el("button", { className: "btn btn-primary", type: "submit", textContent: "Crear agrupación" }))),
-    el("ul", { className: "rows" }, ...S.groups.map((g) =>
-      el("li", {},
-        el("div", { className: "who-n" }, el("b", { textContent: g.name }), el("span", { textContent: g.slug })),
-        el("button", {
-          className: "btn btn-danger", type: "button", textContent: "Eliminar",
-          onclick: async () => {
-            if (!confirm(`¿Eliminar «${g.name}» con todos sus horarios? No se puede deshacer.`)) return;
-            await api.deleteGroup(g.slug);
+  );
+
+  let lista;
+  try {
+    lista = await api.groupsWithOwner();
+  } catch (err) {
+    return box.append(el("p", { className: "note err", textContent: err.message }));
+  }
+
+  lista.forEach((g) => {
+    const correo = el("input", {
+      type: "email", placeholder: "correo@ejemplo.com", value: g.owner_email || "",
+    });
+    const nombre = el("input", { type: "text", placeholder: "Nombre (si la cuenta es nueva)" });
+    const clave = el("input", { type: "password", placeholder: "Contraseña inicial", autocomplete: "new-password" });
+
+    box.append(el("div", { className: "form-card" },
+      el("h3", { textContent: g.name }),
+      el("p", { className: "sub" },
+        g.owner_email
+          ? `Cuenta principal: ${g.owner_name} (${g.owner_email}).`
+          : "Todavía no tiene cuenta principal."),
+      el("form", {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            const r = await api.setOwner(g.slug, {
+              email: correo.value, name: nombre.value, password: clave.value,
+            });
+            S.flash = { tipo: "ok", texto: `${r.owner_email} es ahora la cuenta principal de ${g.name}.` };
             enter(await api.me());
             openSettings("grupos");
-          },
-        })))));
+          } catch (err) {
+            clear(note).append(el("p", { className: "note err", textContent: err.message }));
+          }
+        },
+      },
+        el("label", { className: "field" },
+          el("span", { textContent: "Cuenta principal" }), correo),
+        el("div", { className: "two" },
+          el("label", { className: "field" }, el("span", { textContent: "Nombre" }), nombre),
+          el("label", { className: "field" }, el("span", { textContent: "Contraseña" }), clave)),
+        el("div", { className: "two" },
+          el("button", { className: "btn btn-primary", type: "submit", textContent: "Nombrar principal" }),
+          el("button", {
+            className: "btn btn-danger", type: "button", textContent: "Eliminar agrupación",
+            onclick: async () => {
+              if (!confirm(`¿Eliminar «${g.name}» con todos sus horarios? No se puede deshacer.`)) return;
+              await api.deleteGroup(g.slug);
+              enter(await api.me());
+              openSettings("grupos");
+            },
+          })))));
+  });
 }

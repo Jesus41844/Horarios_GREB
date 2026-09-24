@@ -44,6 +44,9 @@ export const api = {
     request("/auth/password", { method: "POST", json: { current, new: next } }),
 
   createGroup: (name) => request("/groups", { method: "POST", json: { name } }),
+  groupsWithOwner: () => request("/groups"),
+  setOwner: (slug, data) =>
+    request(`/groups/${encodeURIComponent(slug)}/owner`, { method: "PUT", json: data }),
   requests: () => request("/requests"),
   approveRequest: (id) => request(`/requests/${id}/approve`, { method: "POST" }),
   rejectRequest: (id) => request(`/requests/${id}`, { method: "DELETE" }),
@@ -61,6 +64,9 @@ export const api = {
     request(`/g/${encodeURIComponent(slug)}/person?name=${encodeURIComponent(name)}`),
   addBlocks: (slug, data) =>
     request(`/g/${encodeURIComponent(slug)}/blocks`, { method: "POST", json: data }),
+  updateBlock: (slug, id, name, data) =>
+    request(`/g/${encodeURIComponent(slug)}/block/${id}?name=${encodeURIComponent(name)}`,
+      { method: "PUT", json: data }),
   deleteBlock: (slug, id, name) =>
     request(`/g/${encodeURIComponent(slug)}/block/${id}?name=${encodeURIComponent(name)}`,
       { method: "DELETE" }),

@@ -150,6 +150,28 @@ def add_blocks(body: BlocksIn, access: Access = Depends(group_admin), c: Conn = 
     return {"name": name, "created": creada, "ids": ids}
 
 
+@router.put("/block/{block_id}")
+def update_block(block_id: int, name: str, body: BlockIn,
+                 access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+    """Corrige un bloque existente: sirve igual para lo que vino de un PDF, de una
+    imagen o de la mano."""
+    if body.kind not in ("clase", "trabajo"):
+        raise HTTPException(400, f"Tipo no válido: «{body.kind}».")
+    if not 0 <= body.day <= 6:
+        raise HTTPException(400, "Día no válido.")
+    start, end = _minutes(body.start), _minutes(body.end)
+    if start >= end:
+        raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
+
+    pid = repo.person_id(c, access.group["id"], name)
+    asunto = body.subject.strip() or ("Trabajo" if body.kind == "trabajo" else "Clase")
+    if pid is None or not repo.update_block(
+            c, pid, block_id, body.day, start, end, asunto, body.room.strip(), body.kind):
+        raise HTTPException(404, "Ese bloque no existe.")
+    c.commit()
+    return {"updated": block_id}
+
+
 @router.delete("/block/{block_id}")
 def delete_block(block_id: int, name: str,
                  access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):

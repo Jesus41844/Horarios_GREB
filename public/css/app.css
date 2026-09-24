@@ -476,3 +476,12 @@ button, input, select { font: inherit; color: inherit; }
   flex: 0 0 auto; padding: 5px 8px; font-size: 13px;
   border: 1px solid var(--line); border-radius: 7px; background: var(--card);
 }
+
+/* Edición de un bloque dentro de la tabla del horario de una persona. */
+.edit-box {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px; margin: 4px 0;
+}
+.edit-box .ocr-row { border: 0; padding: 0; margin-bottom: 8px; }
+.edit-box .field { margin-bottom: 0; }
+.pday td.del { white-space: nowrap; }

@@ -20,6 +20,12 @@ class GroupIn(BaseModel):
     name: str
 
 
+class OwnerIn(BaseModel):
+    email: str
+    name: str = ""
+    password: str = ""
+
+
 class MemberIn(BaseModel):
     email: str
     name: str = ""
@@ -39,6 +45,43 @@ def create_group(body: GroupIn, _: dict = Depends(superadmin), c: Conn = Depends
     except _UNIQUE_ERRORS:
         raise HTTPException(409, f"Ya existe una agrupación «{slug}»")
     return {"slug": slug, "name": name}
+
+
+@router.get("/groups")
+def list_groups(_: dict = Depends(superadmin), c: Conn = Depends(get_conn)):
+    """Las agrupaciones con su cuenta principal, para el panel del superadmin."""
+    return repo.list_groups_with_owner(c)
+
+
+@router.put("/groups/{slug}/owner")
+def set_group_owner(slug: str, body: OwnerIn,
+                    _: dict = Depends(superadmin), c: Conn = Depends(get_conn)):
+    """Nombra la cuenta principal de una agrupación, aunque ya tuviera otra.
+    Hace falta porque el dueño solo se fija solo al aprobar la primera solicitud."""
+    group = repo.group_by_slug(c, slug)
+    if not group:
+        raise HTTPException(404, "Agrupación no encontrada")
+    email = body.email.strip().lower()
+    if "@" not in email:
+        raise HTTPException(400, "Correo no válido")
+
+    user = repo.user_by_email(c, email)
+    created = user is None
+    if created:
+        if not body.name.strip() or len(body.password) < security.MIN_PASSWORD:
+            raise HTTPException(
+                400,
+                f"Esa cuenta no existe. Para crearla hacen falta nombre y contraseña "
+                f"(mín. {security.MIN_PASSWORD} caracteres).",
+            )
+        user_id = repo.create_user(c, email, body.name.strip(), body.password)
+    else:
+        user_id = user["id"]
+
+    repo.set_member(c, group["id"], user_id, "admin")   # la principal es siempre admin
+    repo.force_owner(c, group["id"], user_id)
+    c.commit()
+    return {"slug": slug, "owner_email": email, "created": created}
 
 
 @router.delete("/groups/{slug}")

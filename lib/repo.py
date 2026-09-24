@@ -119,6 +119,19 @@ def set_owner(c: Conn, group_id: int, user_id: int) -> None:
     )
 
 
+def force_owner(c: Conn, group_id: int, user_id: int) -> None:
+    """Cambia la cuenta principal aunque ya hubiera una. Solo para el superadmin."""
+    c.execute("UPDATE horarios.groups SET owner_user_id = ? WHERE id = ?", (user_id, group_id))
+
+
+def list_groups_with_owner(c: Conn) -> list[dict]:
+    return c.query(
+        "SELECT g.slug, g.name, u.email AS owner_email, u.name AS owner_name "
+        "FROM horarios.groups g LEFT JOIN horarios.users u ON u.id = g.owner_user_id "
+        "ORDER BY g.name"
+    )
+
+
 def delete_group(c: Conn, slug: str) -> bool:
     return c.execute("DELETE FROM horarios.groups WHERE slug = ?", (slug,)) > 0
 
@@ -275,6 +288,16 @@ def add_block(c: Conn, pid: int, day: int, start: int, end: int,
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         (pid, day, start, end, subject, room, tags, kind),
     )[0]["id"]
+
+
+def update_block(c: Conn, pid: int, block_id: int, day: int, start: int, end: int,
+                 subject: str, room: str, kind: str) -> bool:
+    """Corrige un bloque ya guardado, venga del PDF, del OCR o de la mano."""
+    return c.execute(
+        "UPDATE horarios.blocks SET day = ?, start_min = ?, end_min = ?, "
+        "subject = ?, room = ?, kind = ? WHERE id = ? AND person_id = ?",
+        (day, start, end, subject, room, kind, block_id, pid),
+    ) > 0
 
 
 def delete_block(c: Conn, pid: int, block_id: int) -> bool:

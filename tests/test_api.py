@@ -501,3 +501,109 @@ def test_aprobar_una_solicitud_nombra_dueno_solo_la_primera_vez(client):
     # El segundo es admin, pero la gente la gestiona el primero.
     assert segundo.get("/api/g/nueva/members").status_code == 403
     assert primero.get("/api/g/nueva/members").status_code == 200
+
+
+def test_superadmin_nombra_la_cuenta_principal(client):
+    """Hace falta para agrupaciones que ya existían o cuando cambia el encargado."""
+    login(client, "root@x.com")
+    antes = {g["slug"]: g["owner_email"] for g in client.get("/api/groups").json()}
+    assert antes == {"greb": "greb@x.com", "eurus": "eurus@x.com"}
+
+    # Pasar GREB a alguien que ya tiene cuenta pero no era miembro.
+    r = client.put("/api/groups/greb/owner", json={"email": "Ve@X.com"})
+    assert r.json() == {"slug": "greb", "owner_email": "ve@x.com", "created": False}
+    assert {g["slug"]: g["owner_email"] for g in client.get("/api/groups").json()}["greb"] == "ve@x.com"
+    client.post("/api/auth/logout")
+
+    # El nuevo manda y queda de admin; el anterior ya no gestiona gente.
+    login(client, "ve@x.com")
+    assert [(g["slug"], g["role"], g["is_owner"]) for g in
+            client.get("/api/auth/me").json()["groups"]] == [("greb", "admin", True)]
+    assert client.get("/api/g/greb/members").status_code == 200
+    client.post("/api/auth/logout")
+
+    login(client, "greb@x.com")
+    assert client.get("/api/g/greb/members").status_code == 403
+
+
+def test_nombrar_principal_crea_la_cuenta_si_hace_falta(client):
+    login(client, "root@x.com")
+    sin_datos = client.put("/api/groups/greb/owner", json={"email": "nuevo@utp.ac.pa"})
+    assert sin_datos.status_code == 400 and "no existe" in sin_datos.json()["detail"]
+
+    r = client.put("/api/groups/greb/owner", json={
+        "email": "nuevo@utp.ac.pa", "name": "Nuevo Encargado", "password": PW})
+    assert r.json()["created"] is True
+    client.post("/api/auth/logout")
+
+    assert [(g["slug"], g["is_owner"]) for g in
+            login(client, "nuevo@utp.ac.pa").json()["groups"]] == [("greb", True)]
+
+
+def test_solo_el_superadmin_nombra_principal(client):
+    login(client, "greb@x.com")          # dueño de GREB, pero no superadmin
+    assert client.get("/api/groups").status_code == 403
+    assert client.put("/api/groups/greb/owner", json={"email": "ve@x.com"}).status_code == 403
+    client.post("/api/auth/logout")
+    login(client, "root@x.com")
+    assert client.put("/api/groups/inexistente/owner",
+                      json={"email": "ve@x.com"}).status_code == 404
+
+
+def test_editar_un_bloque_que_vino_del_pdf(client):
+    """El PDF es el punto de partida; después se corrige a mano."""
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    p = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()
+    b = p["days"][0]["blocks"][0]
+    assert (b["start"], b["subject"]) == (420, "HER. PROG. AP.")
+
+    r = client.put(f"/api/g/greb/block/{b['id']}", params={"name": "Juan Pérez"}, json={
+        "day": 4, "start": "15:00", "end": "16:30",
+        "subject": "CIRCUITOS LÓG.", "room": "aula 1-213", "kind": "clase"})
+    assert r.status_code == 200
+
+    p = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()
+    viernes = next(d for d in p["days"] if d["day"] == 4)
+    corregido = [x for x in viernes["blocks"] if x["id"] == b["id"]][0]
+    assert (corregido["start"], corregido["end"]) == (900, 990)
+    assert (corregido["subject"], corregido["room"]) == ("CIRCUITOS LÓG.", "aula 1-213")
+    # Y el día viejo ya no lo tiene.
+    lunes = next(d for d in p["days"] if d["day"] == 0)
+    assert b["id"] not in [x["id"] for x in lunes["blocks"]]
+
+
+def test_editar_convierte_clase_en_trabajo(client):
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    b = client.get("/api/g/greb/person",
+                   params={"name": "Juan Pérez"}).json()["days"][0]["blocks"][0]
+
+    client.put(f"/api/g/greb/block/{b['id']}", params={"name": "Juan Pérez"}, json={
+        "day": 0, "start": "14:00", "end": "18:00", "room": "FabLab", "kind": "trabajo"})
+
+    p = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()
+    assert p["works"] is True
+    tarde = [s for s in client.get("/api/g/greb/schedule").json()[0]["segments"]
+             if s["start"] == 840][0]
+    assert tarde["working"] == ["Juan Pérez"]
+
+
+def test_editar_valida_y_respeta_permisos(client):
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    b = client.get("/api/g/greb/person",
+                   params={"name": "Juan Pérez"}).json()["days"][0]["blocks"][0]
+    ruta = f"/api/g/greb/block/{b['id']}"
+    ok = {"day": 0, "start": "8:00", "end": "9:00", "subject": "X", "kind": "clase"}
+
+    for malo in ({**ok, "start": "10:00", "end": "9:00"}, {**ok, "day": 9},
+                 {**ok, "kind": "siesta"}, {**ok, "start": "nada"}):
+        assert client.put(ruta, params={"name": "Juan Pérez"}, json=malo).status_code == 400
+
+    # Un bloque de otra persona no se toca desde este nombre.
+    assert client.put(ruta, params={"name": "Ana Gómez"}, json=ok).status_code == 404
+    client.post("/api/auth/logout")
+
+    login(client, "ve@x.com")   # solo ver
+    assert client.put(ruta, params={"name": "Juan Pérez"}, json=ok).status_code == 403

@@ -157,6 +157,56 @@ def remove_member(c: Conn, group_id: int, user_id: int) -> bool:
     ) > 0
 
 
+# --- solicitudes de acceso -------------------------------------------------
+
+def list_public_groups(c: Conn) -> list[dict]:
+    """Para el formulario de registro: solo nombre y slug, sin datos de nadie."""
+    return c.query("SELECT slug, name FROM horarios.groups ORDER BY name")
+
+
+def create_request(c: Conn, user_id: int, group_id: int) -> None:
+    c.execute(
+        "INSERT INTO horarios.requests (user_id, group_id, created_at) VALUES (?, ?, ?)",
+        (user_id, group_id, now()),
+    )
+
+
+def pending_requests(c: Conn) -> list[dict]:
+    return c.query(
+        "SELECT r.id, u.name, u.email, g.name AS group_name, g.slug, r.created_at "
+        "FROM horarios.requests r "
+        "JOIN horarios.users u ON u.id = r.user_id "
+        "JOIN horarios.groups g ON g.id = r.group_id "
+        "ORDER BY r.created_at"
+    )
+
+
+def request_by_id(c: Conn, request_id: int) -> dict | None:
+    rows = c.query(
+        "SELECT id, user_id, group_id FROM horarios.requests WHERE id = ?", (request_id,)
+    )
+    return rows[0] if rows else None
+
+
+def delete_request(c: Conn, request_id: int) -> bool:
+    return c.execute("DELETE FROM horarios.requests WHERE id = ?", (request_id,)) > 0
+
+
+def requests_of_user(c: Conn, user_id: int) -> list[dict]:
+    return c.query(
+        "SELECT g.name, g.slug FROM horarios.requests r "
+        "JOIN horarios.groups g ON g.id = r.group_id WHERE r.user_id = ?",
+        (user_id,),
+    )
+
+
+def group_has_admin(c: Conn, group_id: int) -> bool:
+    return bool(c.query(
+        "SELECT 1 FROM horarios.memberships WHERE group_id = ? AND role = 'admin'",
+        (group_id,),
+    ))
+
+
 # --- personas y horarios (siempre dentro de una agrupación) ---------------------
 
 def save_person(c: Conn, group_id: int, name: str, filename: str, blocks: list[Block]) -> bool:

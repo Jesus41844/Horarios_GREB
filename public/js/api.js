@@ -36,12 +36,17 @@ export const api = {
   setup: (data) => request("/setup", { method: "POST", json: data }),
 
   me: () => request("/auth/me"),
+  publicGroups: () => request("/auth/groups"),
+  register: (data) => request("/auth/register", { method: "POST", json: data }),
   login: (email, password) => request("/auth/login", { method: "POST", json: { email, password } }),
   logout: () => request("/auth/logout", { method: "POST" }),
   changePassword: (current, next) =>
     request("/auth/password", { method: "POST", json: { current, new: next } }),
 
   createGroup: (name) => request("/groups", { method: "POST", json: { name } }),
+  requests: () => request("/requests"),
+  approveRequest: (id) => request(`/requests/${id}/approve`, { method: "POST" }),
+  rejectRequest: (id) => request(`/requests/${id}`, { method: "DELETE" }),
   deleteGroup: (slug) => request(`/groups/${encodeURIComponent(slug)}`, { method: "DELETE" }),
 
   members: (slug) => request(`/g/${encodeURIComponent(slug)}/members`),

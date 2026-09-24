@@ -16,6 +16,8 @@ const S = {
   day: todayIndex(),
   query: "",
   report: null,
+  pending: 0,     // solicitudes por aprobar (solo superadmin)
+  waiting: null,  // agrupaciones que esta cuenta pidió y aún no le aprueban
 };
 
 const group = () => S.groups.find((g) => g.slug === S.slug) || null;
@@ -76,6 +78,58 @@ function showSetup(message) {
   name.focus();
 }
 
+/** Pedir acceso: crea la cuenta y deja la solicitud esperando aprobación. */
+async function showRegister(message, groups) {
+  if (!groups) {
+    try {
+      groups = await api.publicGroups();
+    } catch {
+      return showLogin("No se pudo cargar la lista de agrupaciones.");
+    }
+  }
+  if (!groups.length) {
+    return showLogin("Todavía no hay ninguna agrupación a la que pedir acceso.");
+  }
+
+  const name = el("input", { type: "text", required: true, autocomplete: "name" });
+  const email = el("input", { type: "email", required: true, autocomplete: "username" });
+  const pass = el("input", { type: "password", required: true, autocomplete: "new-password", minLength: 8 });
+  const group = el("select", { required: true },
+    ...groups.map((g) => el("option", { value: g.slug, textContent: g.name })));
+  const submit = el("button", { className: "btn btn-primary", type: "submit", textContent: "Pedir acceso" });
+
+  const form = el("form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      submit.disabled = true;
+      try {
+        enter(await api.register({
+          name: name.value, email: email.value, password: pass.value, group: group.value,
+        }));
+      } catch (err) {
+        showRegister(err.message, groups);
+      }
+    },
+  },
+    el("label", { className: "field" }, el("span", { textContent: "Tu nombre" }), name),
+    el("label", { className: "field" }, el("span", { textContent: "Correo" }), email),
+    el("label", { className: "field" }, el("span", { textContent: "Contraseña (mín. 8)" }), pass),
+    el("label", { className: "field" }, el("span", { textContent: "Agrupación" }), group),
+    message ? el("p", { className: "note err", textContent: message }) : null,
+    submit);
+
+  clear(root).append(
+    el("div", { className: "login" },
+      el("div", { className: "login-card" },
+        el("h1", {}, "Pedir ", el("span", { textContent: "acceso" })),
+        el("p", { className: "lede", textContent: "Creas tu cuenta y queda esperando a que te aprueben." }),
+        form,
+        el("p", { className: "alt" },
+          "¿Ya tienes cuenta? ",
+          el("button", { className: "link", type: "button", textContent: "Entrar", onclick: () => showLogin() })))));
+  name.focus();
+}
+
 function showLogin(message) {
   closePanel();
   const email = el("input", { type: "email", required: true, autocomplete: "username", autofocus: true });
@@ -104,13 +158,18 @@ function showLogin(message) {
       el("div", { className: "login-card" },
         el("h1", {}, "Horari", el("span", { textContent: "os" })),
         el("p", { className: "lede", textContent: "Entra para ver los horarios de tu agrupación." }),
-        form)));
+        form,
+        el("p", { className: "alt" },
+          "¿Aún no tienes cuenta? ",
+          el("button", { className: "link", type: "button", textContent: "Pedir acceso", onclick: () => showRegister() })))));
   email.focus();
 }
 
 function enter(me) {
   S.user = me.user;
   S.groups = me.groups;
+  S.pending = me.pending || 0;
+  S.waiting = me.waiting || null;
   const saved = remembered();
   S.slug = S.groups.some((g) => g.slug === saved) ? saved : S.groups[0]?.slug || null;
   S.report = null;
@@ -161,7 +220,10 @@ function header() {
       S.slug ? picker : null,
       el("div", { className: "search" }, search),
       el("div", { className: "spacer" }),
-      el("button", { className: "btn", type: "button", textContent: "Ajustes", onclick: openSettings }),
+      el("button", {
+        className: "btn", type: "button",
+        onclick: () => openSettings(S.pending ? "solicitudes" : "cuenta"),
+      }, "Ajustes", S.pending ? el("span", { className: "badge", textContent: String(S.pending) }) : null),
       el("button", {
         className: "btn", type: "button", textContent: "Salir",
         onclick: async () => { await api.logout(); showLogin(); },
@@ -172,6 +234,11 @@ function body(error) {
   if (error) return [el("div", { className: "empty" }, el("strong", { textContent: "No se pudo cargar" }), error)];
 
   if (!S.slug) {
+    if (S.waiting?.length) {
+      return [el("div", { className: "empty" },
+        el("strong", { textContent: "Tu solicitud está esperando aprobación" }),
+        `Pediste acceso a ${S.waiting.map((g) => g.name).join(", ")}. Te avisarán en cuanto te aprueben; vuelve a entrar más tarde.`)];
+    }
     return [el("div", { className: "empty" },
       el("strong", { textContent: "Todavía no hay una agrupación para ti" }),
       S.user.is_superadmin
@@ -462,7 +529,10 @@ async function openPerson(name) {
 function openSettings(tab = "cuenta") {
   const tabs = [["cuenta", "Cuenta"]];
   if (isAdmin()) tabs.push(["miembros", "Miembros"]);
-  if (S.user.is_superadmin) tabs.push(["grupos", "Agrupaciones"]);
+  if (S.user.is_superadmin) {
+    tabs.push(["grupos", "Agrupaciones"]);
+    tabs.push(["solicitudes", S.pending ? `Solicitudes (${S.pending})` : "Solicitudes"]);
+  }
   if (!tabs.some(([id]) => id === tab)) tab = "cuenta";
 
   const bar = el("div", { className: "tabs", role: "tablist" },
@@ -471,7 +541,9 @@ function openSettings(tab = "cuenta") {
       onclick: () => openSettings(id),
     })));
 
-  const views = { cuenta: accountView, miembros: membersView, grupos: groupsView };
+  const views = {
+    cuenta: accountView, miembros: membersView, grupos: groupsView, solicitudes: requestsView,
+  };
   openPanel(...panelHead("Ajustes", S.user.email), bar, el("div", { id: "settings-body" }));
   views[tab]();
 }
@@ -560,6 +632,58 @@ async function membersView() {
   } catch (err) {
     box.append(el("p", { className: "note err", textContent: err.message }));
   }
+}
+
+async function requestsView() {
+  const box = settingsBody();
+  const note = el("div");
+  box.append(note);
+
+  const refrescar = async () => {
+    const me = await api.me();       // vuelve a contar las pendientes
+    S.pending = me.pending || 0;
+    openSettings("solicitudes");
+    render();
+  };
+
+  let lista;
+  try {
+    lista = await api.requests();
+  } catch (err) {
+    return box.append(el("p", { className: "note err", textContent: err.message }));
+  }
+
+  if (!lista.length) {
+    return box.append(el("div", { className: "empty" },
+      el("strong", { textContent: "No hay solicitudes" }),
+      "Cuando alguien pida acceso a una agrupación, aparecerá aquí."));
+  }
+
+  box.append(el("p", { className: "sub", textContent: "Al aprobar, la persona pasa a administrar esa agrupación." }));
+  box.append(el("ul", { className: "rows" }, ...lista.map((r) =>
+    el("li", {},
+      el("div", { className: "who-n" },
+        el("b", { textContent: r.name }),
+        el("span", { textContent: `${r.email} · pide ${r.group_name}` })),
+      el("button", {
+        className: "btn btn-primary", type: "button", textContent: "Aprobar",
+        onclick: async () => {
+          try {
+            await api.approveRequest(r.id);
+            await refrescar();
+          } catch (err) {
+            clear(note).append(el("p", { className: "note err", textContent: err.message }));
+          }
+        },
+      }),
+      el("button", {
+        className: "btn btn-danger", type: "button", textContent: "Rechazar",
+        onclick: async () => {
+          if (!confirm(`¿Rechazar la solicitud de ${r.name}?`)) return;
+          await api.rejectRequest(r.id);
+          await refrescar();
+        },
+      })))));
 }
 
 function groupsView() {

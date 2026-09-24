@@ -18,14 +18,28 @@ class PasswordIn(BaseModel):
     new: str
 
 
+class RegisterIn(BaseModel):
+    name: str
+    email: str
+    password: str
+    group: str          # slug de la agrupación a la que pide acceso
+
+
 def me_payload(c: Conn, user: dict) -> dict:
-    return {
+    groups = repo.groups_for_user(c, user)
+    payload = {
         "user": {
             "id": user["id"], "email": user["email"], "name": user["name"],
             "is_superadmin": bool(user["is_superadmin"]),
         },
-        "groups": repo.groups_for_user(c, user),
+        "groups": groups,
     }
+    if user["is_superadmin"]:
+        payload["pending"] = len(repo.pending_requests(c))  # aviso en el panel
+    elif not groups:
+        # Sin agrupación: o está esperando aprobación, o nadie lo ha añadido aún.
+        payload["waiting"] = repo.requests_of_user(c, user["id"])
+    return payload
 
 
 def _secure(request: Request) -> bool:
@@ -50,6 +64,38 @@ def login(body: LoginIn, request: Request, response: Response, c: Conn = Depends
         secure=_secure(request), path="/",
     )
     return me_payload(c, user)
+
+
+@router.get("/groups")
+def public_groups(c: Conn = Depends(get_conn)):
+    """Lista para el formulario de registro: solo nombres, sin datos de nadie."""
+    return repo.list_public_groups(c)
+
+
+@router.post("/register")
+def register(body: RegisterIn, request: Request, response: Response, c: Conn = Depends(get_conn)):
+    """Crea la cuenta y deja una solicitud pendiente. No da acceso a nada todavía."""
+    email = body.email.strip().lower()
+    name = body.name.strip()
+    if "@" not in email or not name:
+        raise HTTPException(400, "Hacen falta un correo válido y un nombre.")
+    if len(body.password) < security.MIN_PASSWORD:
+        raise HTTPException(400, f"La contraseña necesita al menos {security.MIN_PASSWORD} caracteres.")
+    group = repo.group_by_slug(c, body.group)
+    if not group:
+        raise HTTPException(404, "Esa agrupación no existe.")
+    if repo.user_by_email(c, email):
+        raise HTTPException(409, "Ya hay una cuenta con ese correo. Entra con ella.")
+
+    user_id = repo.create_user(c, email, name, body.password)
+    repo.create_request(c, user_id, group["id"])
+    token = repo.create_session(c, user_id)
+    c.commit()
+    response.set_cookie(
+        COOKIE, token, max_age=repo.SESSION_TTL, httponly=True, samesite="lax",
+        secure=_secure(request), path="/",
+    )
+    return me_payload(c, repo.user_by_email(c, email))
 
 
 @router.post("/logout")

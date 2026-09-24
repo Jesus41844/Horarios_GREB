@@ -49,6 +49,33 @@ def delete_group(slug: str, _: dict = Depends(superadmin), c: Conn = Depends(get
     return {"deleted": slug}
 
 
+@router.get("/requests")
+def list_requests(_: dict = Depends(superadmin), c: Conn = Depends(get_conn)):
+    """Solicitudes pendientes de aprobación, para el panel del superadmin."""
+    return repo.pending_requests(c)
+
+
+@router.post("/requests/{request_id}/approve")
+def approve_request(request_id: int, _: dict = Depends(superadmin), c: Conn = Depends(get_conn)):
+    """Aprueba: la persona pasa a administrar esa agrupación."""
+    req = repo.request_by_id(c, request_id)
+    if not req:
+        raise HTTPException(404, "Esa solicitud ya no existe.")
+    repo.set_member(c, req["group_id"], req["user_id"], "admin")
+    repo.delete_request(c, request_id)
+    c.commit()
+    return {"approved": request_id}
+
+
+@router.delete("/requests/{request_id}")
+def reject_request(request_id: int, _: dict = Depends(superadmin), c: Conn = Depends(get_conn)):
+    """Rechaza: se descarta la solicitud, la cuenta se queda sin acceso."""
+    if not repo.delete_request(c, request_id):
+        raise HTTPException(404, "Esa solicitud ya no existe.")
+    c.commit()
+    return {"rejected": request_id}
+
+
 @router.get("/g/{slug}/members")
 def list_members(access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
     return repo.list_members(c, access.group["id"])

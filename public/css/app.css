@@ -286,10 +286,14 @@ button, input, select { font: inherit; color: inherit; }
   padding: 2px 5px; border-radius: 4px; margin-left: 5px;
 }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tabs {
+  display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px;
+  overflow-x: auto;
+}
 .tabs button {
   border: 0; background: none; color: var(--muted); cursor: pointer;
-  padding: 8px 12px; border-bottom: 2px solid transparent; font-size: 14px;
+  padding: 8px 10px; border-bottom: 2px solid transparent; font-size: 14px;
+  white-space: nowrap;   /* «Solicitudes (2)» no debe partirse en dos líneas */
 }
 .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
@@ -333,3 +337,22 @@ button, input, select { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* --- registro y avisos -------------------------------------------------- */
+
+.login-card .alt {
+  margin: 16px 0 0; font-size: 14px; color: var(--muted); text-align: center;
+}
+.link {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline;
+}
+
+/* Contador de solicitudes pendientes sobre el botón de Ajustes. */
+.badge {
+  display: inline-grid; place-items: center; min-width: 19px; height: 19px;
+  margin-left: 7px; padding: 0 5px; border-radius: 999px;
+  background: var(--bad); color: #fff; font: 600 11px/1 var(--mono);
+}
+
+.rows li .btn { flex: 0 0 auto; }

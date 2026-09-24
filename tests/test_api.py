@@ -197,3 +197,65 @@ def test_setup_cerrado_cuando_ya_hay_cuentas(client):
     assert client.get("/api/setup").json()["needed"] is False
     assert client.post("/api/setup", json={
         "email": "intruso@x.com", "name": "Intruso", "password": PW}).status_code == 409
+
+
+def test_registro_queda_pendiente_y_sin_acceso(client):
+    """Registrarse crea la cuenta pero no da acceso a nada hasta la aprobación."""
+    nuevo = TestClient(client.app)
+    assert {g["slug"] for g in nuevo.get("/api/auth/groups").json()} == {"greb", "eurus"}
+
+    r = nuevo.post("/api/auth/register", json={
+        "name": "Sofía Ng", "email": "Sofia@X.com", "password": PW, "group": "greb"})
+    assert r.status_code == 200
+    assert r.json()["groups"] == []                       # todavía no ve nada
+    assert [g["slug"] for g in r.json()["waiting"]] == ["greb"]
+
+    assert nuevo.get("/api/g/greb/schedule").status_code == 404   # ni existe para él
+    assert nuevo.get("/api/requests").status_code == 403          # no es superadmin
+    assert nuevo.post("/api/auth/register", json={
+        "name": "Otra", "email": "sofia@x.com", "password": PW, "group": "greb"}).status_code == 409
+    assert nuevo.post("/api/auth/register", json={
+        "name": "X", "email": "x@x.com", "password": PW, "group": "inexistente"}).status_code == 404
+
+
+def test_superadmin_aprueba_y_queda_de_admin(client):
+    nuevo = TestClient(client.app)
+    nuevo.post("/api/auth/register", json={
+        "name": "Sofía Ng", "email": "sofia@x.com", "password": PW, "group": "eurus"})
+
+    login(client, "root@x.com")
+    assert client.get("/api/auth/me").json()["pending"] == 1      # aviso en el panel
+    pend = client.get("/api/requests").json()
+    assert len(pend) == 1
+    assert (pend[0]["email"], pend[0]["group_name"]) == ("sofia@x.com", "Eurus")
+
+    assert client.post(f"/api/requests/{pend[0]['id']}/approve").status_code == 200
+    assert client.get("/api/requests").json() == []
+    assert client.get("/api/auth/me").json()["pending"] == 0
+
+    me = nuevo.get("/api/auth/me").json()                          # ya tiene acceso
+    assert [(g["slug"], g["role"]) for g in me["groups"]] == [("eurus", "admin")]
+    assert nuevo.get("/api/g/eurus/schedule").status_code == 200
+    assert nuevo.get("/api/g/greb/schedule").status_code == 404    # la otra sigue vedada
+
+
+def test_superadmin_rechaza_solicitud(client):
+    nuevo = TestClient(client.app)
+    nuevo.post("/api/auth/register", json={
+        "name": "Intruso", "email": "int@x.com", "password": PW, "group": "greb"})
+    login(client, "root@x.com")
+    rid = client.get("/api/requests").json()[0]["id"]
+
+    assert client.delete(f"/api/requests/{rid}").status_code == 200
+    assert client.delete(f"/api/requests/{rid}").status_code == 404   # ya no existe
+    me = nuevo.get("/api/auth/me").json()
+    assert me["groups"] == [] and me["waiting"] == []                 # sin acceso ni espera
+
+
+def test_admin_de_grupo_no_ve_ni_aprueba_solicitudes(client):
+    TestClient(client.app).post("/api/auth/register", json={
+        "name": "Sofía", "email": "sofia@x.com", "password": PW, "group": "greb"})
+    login(client, "greb@x.com")            # admin de GREB, no superadmin
+    assert client.get("/api/requests").status_code == 403
+    assert client.post("/api/requests/1/approve").status_code == 403
+    assert "pending" not in client.get("/api/auth/me").json()

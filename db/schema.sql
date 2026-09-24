@@ -41,6 +41,17 @@ create table if not exists horarios.memberships (
 );
 create index if not exists memberships_group_idx on horarios.memberships(group_id);
 
+-- Solicitudes de acceso: quien se registra pide entrar a una agrupación y espera
+-- a que el superadmin le apruebe. Al aprobar, la fila se convierte en membresía.
+create table if not exists horarios.requests (
+  id bigint generated always as identity primary key,
+  user_id bigint not null references horarios.users(id) on delete cascade,
+  group_id bigint not null references horarios.groups(id) on delete cascade,
+  created_at bigint not null,
+  unique (user_id, group_id)
+);
+create index if not exists requests_group_idx on horarios.requests(group_id);
+
 create table if not exists horarios.people (
   id bigint generated always as identity primary key,
   group_id bigint not null references horarios.groups(id) on delete cascade,
@@ -69,5 +80,6 @@ alter table horarios.sessions enable row level security;
 alter table horarios.login_failures enable row level security;
 alter table horarios.groups enable row level security;
 alter table horarios.memberships enable row level security;
+alter table horarios.requests enable row level security;
 alter table horarios.people enable row level security;
 alter table horarios.blocks enable row level security;

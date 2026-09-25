@@ -46,8 +46,9 @@ for (const [texto, esperado] of Object.entries(dudas)) eq(aulaDudosa(texto), esp
 
 // --- el OCR reconoce Salón y deja fuera las virtuales
 import { esVirtual } from "../public/js/ocr.js";
-for (const [t, e] of Object.entries({ "Salón 2-N01": true, "aula 3-N03": true,
-                                      "aula 3-405": false, "aula 3-N09": false }))
+for (const [t, e] of Object.entries({
+  "Salón 2-N01": true, "aula 3-N03": true, "aula 3-N09": true, "aula 4-N01": true,
+  "aula 3-405": false, "Salón 2-301": false, "aula 1-213": false }))
   eq(esVirtual(t), e, `esVirtual(${t})`);
 
 const lineas2 = [

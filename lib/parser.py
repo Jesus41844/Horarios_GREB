@@ -12,9 +12,10 @@ TIME_RE = re.compile(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})([AP])\.?M", re.I)
 TAG_RE = re.compile(r"\(([A-Za-z])\)")
 # Los horarios de la UTP escriben el sitio como «aula 3-405» o «Salón 3-N03».
 ROOM_RE = re.compile(r"^(aula|salon)\b", re.I)
-# «Salón 2-N01», con ambos dígitos del 1 al 3, es una clase virtual: no ocupa a
-# nadie en la universidad, así que no cuenta para saber quién está libre.
-VIRTUAL_RE = re.compile(r"\b[1-3]\s*-\s*N0[1-3]\b", re.I)
+# Clase virtual: en el código del sitio, donde iría el primer dígito de un aula
+# física (3-405) hay una N (3-N03). Los números que la rodean no importan. No
+# ocupa a nadie en la universidad, así que no cuenta para saber quién está libre.
+VIRTUAL_RE = re.compile(r"\b\d\s*-\s*N0\d\b", re.I)
 
 
 def es_virtual(room: str) -> bool:

@@ -610,11 +610,14 @@ def test_editar_valida_y_respeta_permisos(client):
 
 
 def test_las_clases_virtuales_no_entran(client):
-    """«Salón 2-N01» (dígitos 1–3) es virtual: no ocupa a nadie en la universidad."""
+    """Donde iría el primer dígito de un aula física hay una N: es virtual, sea cual
+    sea el número que la rodea."""
     from lib.parser import es_virtual
-    for sitio in ("Salón 2-N01", "aula 3-N03", "SALON 1 - N02"):
+    for sitio in ("Salón 2-N01", "aula 3-N03", "SALON 1 - N02", "aula 3-N09",
+                  "aula 4-N01", "Salon 9-n05"):
         assert es_virtual(sitio), sitio
-    for sitio in ("aula 3-405", "aula 1-213", "aula 3-N09", "aula 4-N01", ""):
+    # Con un número donde iría la N, es un aula física.
+    for sitio in ("aula 3-405", "aula 1-213", "Salón 2-301", "aula 3-419", ""):
         assert not es_virtual(sitio), sitio
 
     login(client, "greb@x.com")

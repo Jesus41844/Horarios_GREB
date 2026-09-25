@@ -19,9 +19,9 @@ const HORA = /(\d{1,2}):(\d{2})[-–—](\d{1,2}):(\d{2})\s*\.?\s*([ap])\.?\s*m/
 // El sitio se escribe «aula 3-405» o «Salón 3-N03».
 const AULA = /(aula|sal[oó]n)\s*[\w?-]+/i;
 
-// «Salón 2-N01», con ambos dígitos del 1 al 3, es una clase virtual: no ocupa a
-// nadie en la universidad y no entra en el horario.
-const VIRTUAL = /\b[1-3]\s*-\s*N0[1-3]\b/i;
+// Clase virtual: donde iría el primer dígito de un aula física (3-405) hay una N
+// (3-N03). Los números que la rodean no importan. No ocupa a nadie y no entra.
+const VIRTUAL = /\b\d\s*-\s*N0\d\b/i;
 export const esVirtual = (texto) => VIRTUAL.test(texto || "");
 
 /** Un código de aula con la forma esperada: 3-405. */

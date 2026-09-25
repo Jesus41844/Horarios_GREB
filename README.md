@@ -102,9 +102,11 @@ Sin `DATABASE_URL` usa un `data.db` SQLite y crea las tablas solo. Con ella, hab
   la base solo queda su hash. Cinco intentos fallidos bloquean el correo 15 minutos.
 - Cambiar la contraseña cierra las demás sesiones.
 - Cada subida va en su propia petición: Vercel limita cada una a ~4,5 MB.
-- **Clases virtuales fuera**: un sitio con la forma `Salón 2-N01` (ambos dígitos del 1 al 3) es una
-  clase virtual y no ocupa a nadie en la universidad, así que ni el PDF ni el OCR la guardan. El
-  informe de subida dice cuántas se dejaron fuera. Vale igual «Salón» que «aula».
+- **Clases virtuales fuera**: si en el código del sitio, donde iría el primer dígito de un aula
+  física (`3-405`), hay una **N** (`3-N03`), es una clase virtual y no ocupa a nadie en la
+  universidad: ni el PDF ni el OCR la guardan. Los números que rodean a la N no importan
+  (`Salón 2-N01`, `aula 4-N09`...). Vale igual «Salón» que «aula». El informe de subida dice
+  cuántas se dejaron fuera.
 - El lector espera la tabla `HORAS × días` de los horarios de la UTP (Crystal Reports), con
   texto seleccionable. Un PDF escaneado se rechaza con ese motivo en vez de adivinar.
 - **El OCR no es exacto** y por eso la revisión es obligatoria: en la prueba con una captura

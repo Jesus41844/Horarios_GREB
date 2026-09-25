@@ -180,7 +180,8 @@ def test_setup_crea_primera_cuenta_y_se_cierra(monkeypatch, tmp_path):
     from api.index import app
     c = TestClient(app)
 
-    assert c.get("/api/setup").json() == {"needed": True, "migrated": True}
+    estado = c.get("/api/setup").json()
+    assert estado["needed"] is True and estado["migrated"] is True
     datos = {"email": "Jefe@X.com", "name": "Jefe", "password": PW}
 
     assert c.post("/api/setup", json={**datos, "password": "corta"}).status_code == 400
@@ -631,3 +632,63 @@ def test_las_clases_virtuales_no_entran(client):
 
     # El jueves solo tenía esa clase virtual, así que queda libre entero.
     assert client.get("/api/g/greb/schedule").json()[3]["segments"] == []
+
+
+def test_limpieza_borra_las_virtuales_ya_guardadas(client):
+    """Datos viejos, de antes de la regla, se corrigen solos y una sola vez."""
+    from lib import fixes
+    from lib.db import connect
+    nombre = "2026-09-24-borrar-clases-virtuales"
+
+    with connect() as c:
+        gid = repo.group_by_slug(c, "greb")["id"]
+        pid = repo.create_person(c, gid, "Juan Viejo")
+        repo.add_block(c, pid, 0, 420, 465, "HER. PROG.", "aula 3-405", "clase")    # presencial
+        repo.add_block(c, pid, 0, 470, 515, "MET. INV.", "Salón 3-N03", "clase")    # virtual
+        repo.add_block(c, pid, 1, 420, 465, "X", "aula 4-N09", "clase")             # virtual
+        repo.add_block(c, pid, 2, 420, 465, "SIN AULA", "", "clase")                # sin sitio: se queda
+        repo.add_block(c, pid, 3, 840, 1080, "Trabajo", "Sala 3-N01", "trabajo")    # trabajo: intocable
+        c.execute("DELETE FROM horarios.applied_migrations WHERE name = ?", (nombre,))
+        c.commit()
+
+        hechas = fixes.run(c)
+        assert hechas[nombre] == "2 clases virtuales borradas"
+        salas = sorted(r["room"] for r in c.query(
+            "SELECT room FROM horarios.blocks WHERE person_id = ?", (pid,)))
+        assert salas == ["", "Sala 3-N01", "aula 3-405"]   # el trabajo no se toca
+
+        assert fixes.run(c) == {}                            # no se repite
+        assert fixes.aplicadas(c)[nombre] == "2 clases virtuales borradas"
+
+
+def test_setup_muestra_las_limpiezas_aplicadas(client):
+    aplicadas = client.get("/api/setup").json()["applied"]
+    assert "2026-09-24-borrar-clases-virtuales" in aplicadas
+
+
+def test_no_se_pueden_teclear_clases_virtuales(client):
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    virtual = {"day": 0, "start": "8:00", "end": "9:00",
+               "subject": "X", "room": "Salón 2-N01", "kind": "clase"}
+
+    # Solo virtuales: se rechaza en vez de crear una persona vacía.
+    r = client.post("/api/g/greb/blocks", json={"name": "Nuevo Sin Nada", "blocks": [virtual]})
+    assert r.status_code == 400 and "virtuales" in r.json()["detail"]
+    assert "Nuevo Sin Nada" not in [p["name"] for p in client.get("/api/g/greb/people").json()]
+
+    # Mezcladas: se guarda la presencial y se cuenta la virtual.
+    presencial = {**virtual, "room": "aula 3-405"}
+    r = client.post("/api/g/greb/blocks", json={"name": "Juan Pérez",
+                                                "blocks": [virtual, presencial]})
+    assert r.status_code == 200 and len(r.json()["ids"]) == 1 and r.json()["virtual"] == 1
+
+    # Editar una clase para dejarla virtual también se rechaza.
+    b = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()["days"][0]["blocks"][0]
+    assert client.put(f"/api/g/greb/block/{b['id']}", params={"name": "Juan Pérez"},
+                      json=virtual).status_code == 400
+
+    # Una franja de trabajo nunca es virtual, aunque el sitio se parezca.
+    trabajo = {**virtual, "kind": "trabajo", "room": "Sala 3-N01"}
+    assert client.post("/api/g/greb/blocks", json={"name": "Juan Pérez",
+                                                   "blocks": [trabajo]}).status_code == 200

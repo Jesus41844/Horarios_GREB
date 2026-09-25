@@ -78,6 +78,13 @@ create table if not exists horarios.blocks (
 );
 create index if not exists blocks_person_idx on horarios.blocks(person_id);
 
+-- Limpiezas de datos ya aplicadas, para no repetirlas en cada arranque.
+create table if not exists horarios.applied_migrations (
+  name text primary key,
+  applied_at bigint not null,
+  detail text not null default ''         -- qué hizo, p. ej. «12 filas borradas»
+);
+
 -- La API se conecta como dueño de la base; RLS activado por si algún día se expone el esquema.
 alter table horarios.users enable row level security;
 alter table horarios.sessions enable row level security;
@@ -87,3 +94,4 @@ alter table horarios.memberships enable row level security;
 alter table horarios.requests enable row level security;
 alter table horarios.people enable row level security;
 alter table horarios.blocks enable row level security;
+alter table horarios.applied_migrations enable row level security;

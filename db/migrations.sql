@@ -12,3 +12,10 @@ update horarios.groups g set owner_user_id = (
   select min(m.user_id) from horarios.memberships m
   where m.group_id = g.id and m.role = 'admin'
 ) where g.owner_user_id is null;
+
+create table if not exists horarios.applied_migrations (
+  name text primary key,
+  applied_at bigint not null,
+  detail text not null default ''
+);
+alter table horarios.applied_migrations enable row level security;

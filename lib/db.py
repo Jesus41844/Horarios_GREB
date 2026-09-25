@@ -19,13 +19,15 @@ MIGRATIONS_FILE = ROOT / "db" / "migrations.sql"
 # Columnas que `migrations.sql` debe haber creado. Si falta alguna, la base viene
 # de una versión anterior y hay que aplicarlas. Al añadir una migración nueva, se
 # añade aquí su columna.
-_ESPERADAS = [("blocks", "kind"), ("groups", "owner_user_id")]
+_ESPERADAS = [("blocks", "kind"), ("groups", "owner_user_id"),
+              ("applied_migrations", "name")]
 _SENTINEL = (
     "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'horarios' "
     "AND (table_name, column_name) IN (" + ", ".join(["(%s, %s)"] * len(_ESPERADAS)) + ")"
 )
 _SENTINEL_ARGS = tuple(x for par in _ESPERADAS for x in par)
 _migrated = False
+_fixed: set[str] = set()      # bases (URL o ruta) cuyas limpiezas ya se aplicaron
 # Id fijo del candado: hash() de Python varía entre procesos y no serializaría nada.
 _LOCK_ID = 728411
 
@@ -136,7 +138,22 @@ def connect():
         raw.execute("ATTACH DATABASE ? AS horarios", (sqlite_path(),))
         raw.execute("PRAGMA foreign_keys = ON")
         raw.executescript(sqlite_ddl())
+    conn = Conn(raw, postgres=bool(url))
+    _aplicar_limpiezas(conn, url or sqlite_path())
     try:
-        yield Conn(raw, postgres=bool(url))
+        yield conn
     finally:
         raw.close()
+
+
+def _aplicar_limpiezas(conn: "Conn", clave: str) -> None:
+    """Corrige datos viejos una vez por base y proceso. Import perezoso: `fixes`
+    depende de `repo`, que depende de este módulo."""
+    if clave in _fixed:
+        return
+    try:
+        from . import fixes
+        fixes.run(conn)
+        _fixed.add(clave)
+    except Exception:
+        conn.raw.rollback()   # que un fallo aquí no tumbe la petición; se reintenta luego

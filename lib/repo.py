@@ -308,6 +308,22 @@ def delete_block(c: Conn, pid: int, block_id: int) -> bool:
     ) > 0
 
 
+def delete_virtual_blocks(c: Conn) -> int:
+    """Borra las clases virtuales que ya estaban guardadas, en todas las agrupaciones.
+
+    Usa `es_virtual`, la misma regla que el lector de PDF, en vez de una expresión
+    regular escrita en SQL: así hay un solo criterio y funciona igual en Postgres
+    y en SQLite. Solo toca clases; una franja de trabajo nunca se considera virtual.
+    """
+    from .parser import es_virtual
+    candidatos = c.query(
+        "SELECT id, room FROM horarios.blocks WHERE kind = 'clase' AND room <> ''")
+    ids = [r["id"] for r in candidatos if es_virtual(r["room"])]
+    for i in ids:
+        c.execute("DELETE FROM horarios.blocks WHERE id = ?", (i,))
+    return len(ids)
+
+
 def delete_blocks_of_kind(c: Conn, pid: int, kind: str) -> int:
     return c.execute(
         "DELETE FROM horarios.blocks WHERE person_id = ? AND kind = ?", (pid, kind)

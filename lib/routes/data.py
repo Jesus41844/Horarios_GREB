@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from .. import repo
 from ..db import Conn
 from ..deps import Access, get_conn, group_access, group_admin
-from ..parser import ParseError, norm, parse_pdf, person_from_filename
+from ..parser import ParseError, es_virtual, norm, parse_pdf, person_from_filename
 from ..schedule import build_week, merge_ranges
 
 router = APIRouter(prefix="/g/{slug}", tags=["horarios"])
@@ -128,6 +128,7 @@ def add_blocks(body: BlocksIn, access: Access = Depends(group_admin), c: Conn = 
         raise HTTPException(400, "Tipo no válido.")
 
     limpios = []
+    virtuales = 0
     for b in body.blocks:
         if b.kind not in ("clase", "trabajo"):
             raise HTTPException(400, f"Tipo no válido: «{b.kind}».")
@@ -136,8 +137,14 @@ def add_blocks(body: BlocksIn, access: Access = Depends(group_admin), c: Conn = 
         start, end = _minutes(b.start), _minutes(b.end)
         if start >= end:
             raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
+        if b.kind == "clase" and es_virtual(b.room):
+            virtuales += 1      # no ocupa a nadie: no se guarda
+            continue
         asunto = b.subject.strip() or ("Trabajo" if b.kind == "trabajo" else "Clase")
         limpios.append((b.day, start, end, asunto, b.room.strip(), b.kind))
+    if not limpios:
+        raise HTTPException(400, "Todas las clases son virtuales: no se guardan, "
+                                 "porque no ocupan a nadie en la universidad.")
 
     pid = repo.person_id(c, access.group["id"], name)
     creada = pid is None
@@ -147,7 +154,7 @@ def add_blocks(body: BlocksIn, access: Access = Depends(group_admin), c: Conn = 
         repo.delete_blocks_of_kind(c, pid, body.replace_kind)
     ids = [repo.add_block(c, pid, *args) for args in limpios]
     c.commit()
-    return {"name": name, "created": creada, "ids": ids}
+    return {"name": name, "created": creada, "ids": ids, "virtual": virtuales}
 
 
 @router.put("/block/{block_id}")
@@ -163,6 +170,8 @@ def update_block(block_id: int, name: str, body: BlockIn,
     if start >= end:
         raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
 
+    if body.kind == "clase" and es_virtual(body.room):
+        raise HTTPException(400, "Ese sitio es una clase virtual: no ocupa a nadie, no se guarda.")
     pid = repo.person_id(c, access.group["id"], name)
     asunto = body.subject.strip() or ("Trabajo" if body.kind == "trabajo" else "Clase")
     if pid is None or not repo.update_block(

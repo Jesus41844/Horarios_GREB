@@ -607,3 +607,24 @@ def test_editar_valida_y_respeta_permisos(client):
 
     login(client, "ve@x.com")   # solo ver
     assert client.put(ruta, params={"name": "Juan Pérez"}, json=ok).status_code == 403
+
+
+def test_las_clases_virtuales_no_entran(client):
+    """«Salón 2-N01» (dígitos 1–3) es virtual: no ocupa a nadie en la universidad."""
+    from lib.parser import es_virtual
+    for sitio in ("Salón 2-N01", "aula 3-N03", "SALON 1 - N02"):
+        assert es_virtual(sitio), sitio
+    for sitio in ("aula 3-405", "aula 1-213", "aula 3-N09", "aula 4-N01", ""):
+        assert not es_virtual(sitio), sitio
+
+    login(client, "greb@x.com")
+    r = upload(client, "greb", "Juan Pérez").json()["results"][0]
+    # El PDF de ejemplo trae 18 bloques; dos son en «aula 3-N03».
+    assert (r["blocks"], r["virtual"]) == (16, 2)
+
+    p = client.get("/api/g/greb/person", params={"name": "Juan Pérez"}).json()
+    sitios = [b["room"] for d in p["days"] for b in d["blocks"]]
+    assert sitios and not any("N0" in s for s in sitios)
+
+    # El jueves solo tenía esa clase virtual, así que queda libre entero.
+    assert client.get("/api/g/greb/schedule").json()[3]["segments"] == []

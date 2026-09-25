@@ -10,6 +10,15 @@ DAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"
 
 TIME_RE = re.compile(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})([AP])\.?M", re.I)
 TAG_RE = re.compile(r"\(([A-Za-z])\)")
+# Los horarios de la UTP escriben el sitio como «aula 3-405» o «Salón 3-N03».
+ROOM_RE = re.compile(r"^(aula|salon)\b", re.I)
+# «Salón 2-N01», con ambos dígitos del 1 al 3, es una clase virtual: no ocupa a
+# nadie en la universidad, así que no cuenta para saber quién está libre.
+VIRTUAL_RE = re.compile(r"\b[1-3]\s*-\s*N0[1-3]\b", re.I)
+
+
+def es_virtual(room: str) -> bool:
+    return bool(VIRTUAL_RE.search(room or ""))
 
 
 class ParseError(Exception):
@@ -60,7 +69,7 @@ def _parse_cell(cell: str):
     lines = [l for l in lines if l]
     if not lines:
         return None
-    room_lines = [l for l in lines if norm(l).startswith("aula")]
+    room_lines = [l for l in lines if ROOM_RE.match(norm(l))]
     subj_lines = [l for l in lines if l not in room_lines]
     subject = " ".join(subj_lines)
     tags = "".join(t.upper() for t in TAG_RE.findall(subject))
@@ -69,13 +78,15 @@ def _parse_cell(cell: str):
     return subject or "(sin nombre)", room, tags
 
 
-def parse_pdf(path: Path) -> list[Block]:
+def parse_pdf(path: Path) -> tuple[list[Block], int]:
+    """Devuelve los bloques presenciales y cuántos se dejaron fuera por virtuales."""
     try:
         pdf = pdfplumber.open(path)
     except Exception:  # corrupto, cifrado, o no es un PDF de verdad
         raise ParseError("No se pudo abrir el PDF. Puede estar dañado o protegido con contraseña.")
 
     blocks: list[Block] = []
+    virtuales = 0
     has_text = False
     found_table = False
     with pdf:
@@ -104,13 +115,20 @@ def parse_pdf(path: Path) -> list[Block]:
                         if j >= len(row):
                             continue
                         cell = _parse_cell(row[j])
-                        if cell:
-                            blocks.append(Block(day, span[0], span[1], *cell))
+                        if not cell:
+                            continue
+                        if es_virtual(cell[1]):
+                            virtuales += 1
+                            continue
+                        blocks.append(Block(day, span[0], span[1], *cell))
 
     if not has_text:
         raise ParseError("El PDF no tiene texto seleccionable (parece un escaneo).")
     if not found_table:
         raise ParseError("No se encontró la tabla de horarios (fila con LUNES, MARTES...).")
     if not blocks:
-        raise ParseError("Se encontró la tabla pero no hay clases (¿horario vacío?).")
-    return blocks
+        raise ParseError(
+            "Todas las clases son virtuales." if virtuales
+            else "Se encontró la tabla pero no hay clases (¿horario vacío?)."
+        )
+    return blocks, virtuales

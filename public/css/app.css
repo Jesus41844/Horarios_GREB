@@ -488,3 +488,8 @@ button, input, select { font: inherit; color: inherit; }
 .edit-box .ocr-row { border: 0; padding: 0; margin-bottom: 8px; }
 .edit-box .field { margin-bottom: 0; }
 .pday td.del { white-space: nowrap; }
+
+/* Aula que no encaja con los códigos conocidos: hay que mirarla. */
+.ocr-row input.dudoso {
+  border-color: var(--bad); background: var(--bad-soft);
+}

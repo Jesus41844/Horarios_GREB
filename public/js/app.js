@@ -1,5 +1,5 @@
 import { ApiError, api } from "./api.js";
-import { leerImagen } from "./ocr.js";
+import { aulaDudosa, leerImagen } from "./ocr.js";
 import {
   DAYS, clear, el, fmt, fmtRange, highlight, hourLabel, minutesNow, norm, people, todayIndex,
 } from "./dom.js";
@@ -605,14 +605,14 @@ async function revisarImagen(file, pendientes = []) {
   }
   S.report = null;
   render();
-  panelRevision(person_from_filename(file.name), bloques, pendientes);
+  panelRevision(person_from_filename(file.name), bloques, pendientes, bloques.virtuales || 0);
 }
 
 const person_from_filename = (nombre) =>
   nombre.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 
 /** Tabla editable con lo que se leyó. El OCR se equivoca: esto es el filtro. */
-function panelRevision(nombre, bloques, pendientes = []) {
+function panelRevision(nombre, bloques, pendientes = [], virtuales = 0) {
   const filas = bloques.map((b) => ({ ...b }));
   const note = el("div");
   const cuerpo = el("div");
@@ -640,7 +640,10 @@ function panelRevision(nombre, bloques, pendientes = []) {
       const aula = el("input", {
         type: "text", className: "aula", value: f.room, placeholder: "Aula", ariaLabel: "Aula",
       });
-      aula.oninput = () => { f.room = aula.value; };
+      // Los códigos son 3-405 o 3-N03: lo que no encaje se marca para revisarlo.
+      const marcarAula = () => aula.classList.toggle("dudoso", aulaDudosa(aula.value));
+      aula.oninput = () => { f.room = aula.value; marcarAula(); };
+      marcarAula();
 
       cuerpo.append(el("div", { className: "ocr-row" },
         dia, desde, hasta,
@@ -684,6 +687,10 @@ function panelRevision(nombre, bloques, pendientes = []) {
   openPanel(
     ...panelHead("Revisa lo que se leyó",
       "El lector de imágenes se equivoca. Corrige lo que haga falta antes de guardar."),
+    virtuales
+      ? el("p", { className: "note ok",
+        textContent: `${virtuales} clase${virtuales > 1 ? "s virtuales quedaron" : " virtual quedó"} fuera.` })
+      : null,
     note,
     el("label", { className: "field" }, el("span", { textContent: "¿De quién es este horario?" }), nombreInput),
     cuerpo,
@@ -710,7 +717,10 @@ function reportCard(report) {
     list.append(r.ok
       ? el("li", { className: "good" },
         el("span", { className: "f", textContent: `✓ ${r.file}` }),
-        el("span", { className: "why", textContent: ` → ${r.name}, ${r.blocks} bloques${r.updated ? ", actualizado" : ""}` }))
+        el("span", { className: "why", textContent:
+          ` → ${r.name}, ${r.blocks} bloques`
+          + (r.virtual ? `, ${r.virtual} virtual${r.virtual > 1 ? "es" : ""} fuera` : "")
+          + (r.updated ? ", actualizado" : "") }))
       : el("li", { className: "fail" },
         el("span", { className: "f", textContent: `✕ ${r.file}` }),
         el("span", { className: "why", textContent: ` — ${r.error}` })));

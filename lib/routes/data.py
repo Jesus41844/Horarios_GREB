@@ -70,10 +70,10 @@ def upload(
             with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
                 tmp.write(data)
                 tmp.flush()
-                blocks = parse_pdf(Path(tmp.name))
+                blocks, virtuales = parse_pdf(Path(tmp.name))
             updated = repo.save_person(c, access.group["id"], name, filename, blocks)
             c.commit()
-            res.update(ok=True, blocks=len(blocks), updated=updated)
+            res.update(ok=True, blocks=len(blocks), updated=updated, virtual=virtuales)
         except ParseError as e:
             res.update(ok=False, error=str(e))
         except Exception as e:  # cualquier otro fallo también se informa con nombre

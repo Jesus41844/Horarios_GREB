@@ -16,6 +16,21 @@ const DIAS = [
 // "7:00-7:45A.M." y sus variantes, ya sin espacios.
 const HORA = /(\d{1,2}):(\d{2})[-–—](\d{1,2}):(\d{2})\s*\.?\s*([ap])\.?\s*m/i;
 
+// El sitio se escribe «aula 3-405» o «Salón 3-N03».
+const AULA = /(aula|sal[oó]n)\s*[\w?-]+/i;
+
+// «Salón 2-N01», con ambos dígitos del 1 al 3, es una clase virtual: no ocupa a
+// nadie en la universidad y no entra en el horario.
+const VIRTUAL = /\b[1-3]\s*-\s*N0[1-3]\b/i;
+export const esVirtual = (texto) => VIRTUAL.test(texto || "");
+
+/** Un código de aula con la forma esperada: 3-405. */
+export function aulaDudosa(texto) {
+  const codigo = (texto || "").replace(/^(aula|sal[oó]n)\s*/i, "").trim();
+  if (!codigo) return false;                       // sin aula no hay nada que dudar
+  return !/^\d-\d{3}$/i.test(codigo);
+}
+
 let cargando = null;
 
 /** Carga Tesseract una sola vez, desde el CDN. */
@@ -100,6 +115,7 @@ export function construirBloques(palabras, lineas) {
   }
 
   const bloques = [];
+  let virtuales = 0;
   for (const [clave, trozos] of celdas) {
     const [fi, ci] = clave.split("|").map(Number);
     // Los bordes de la tabla se cuelan como |, [ o ] pegados al texto.
@@ -110,20 +126,26 @@ export function construirBloques(palabras, lineas) {
       .replace(/\s+/g, " ")
       .trim();
     if (texto.length < 2) continue;
-    const aula = /aula\s*[\w-]+/i.exec(texto);
-    const materia = texto.replace(/aula\s*[\w-]+/ig, "").trim();
+    const aula = AULA.exec(texto);
+    const materia = texto.replace(new RegExp(AULA.source, "ig"), "").trim();
     if (!materia) continue;
+    if (esVirtual(aula ? aula[0] : texto)) { virtuales += 1; continue; }
     bloques.push({
       day: columnas[ci].day,
       start: filas[fi].start,
       end: filas[fi].end,
       subject: materia,
-      room: aula ? aula[0] : "",
+      room: aula ? aula[0].replace(/\s+/g, " ").replace(/\bn0/i, "N0") : "",
       kind: "clase",
     });
   }
   bloques.sort((a, b) => a.day - b.day || a.start - b.start);
-  if (!bloques.length) throw new Error("Se reconoció la tabla pero no se leyó ninguna clase.");
+  if (!bloques.length) {
+    throw new Error(virtuales
+      ? "Todas las clases que se leyeron son virtuales."
+      : "Se reconoció la tabla pero no se leyó ninguna clase.");
+  }
+  bloques.virtuales = virtuales;   // para avisar de cuántas se dejaron fuera
   return bloques;
 }
 

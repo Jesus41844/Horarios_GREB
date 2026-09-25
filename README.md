@@ -107,6 +107,11 @@ Sin `DATABASE_URL` usa un `data.db` SQLite y crea las tablas solo. Con ella, hab
   universidad: ni el PDF ni el OCR la guardan. Los números que rodean a la N no importan
   (`Salón 2-N01`, `aula 4-N09`...). Vale igual «Salón» que «aula». El informe de subida dice
   cuántas se dejaron fuera.
+- **Limpiezas de datos**: si un cambio de reglas obliga a corregir lo ya guardado, `lib/fixes.py`
+  lo aplica solo, una vez, al arrancar, y lo anota en `applied_migrations` para no repetirlo.
+  `GET /api/setup` devuelve `applied` con lo que hizo cada una. Así las clases virtuales que
+  ya estaban guardadas se borraron sin tocar la base a mano. Teclear o editar una clase con
+  sitio virtual se rechaza, para que no vuelvan a entrar.
 - El lector espera la tabla `HORAS × días` de los horarios de la UTP (Crystal Reports), con
   texto seleccionable. Un PDF escaneado se rechaza con ese motivo en vez de adivinar.
 - **El OCR no es exacto** y por eso la revisión es obligatoria: en la prueba con una captura

@@ -1,129 +1,271 @@
 # Horarios
 
-Cada agrupación sube los PDF de horario de su gente y la web responde la pregunta real:
-**¿cuándo estamos todos libres?** Muestra, tramo a tramo, quién está en clase, marca los
-huecos y deja buscar a cualquier persona por su nombre.
+Aplicación web para consultar, en un solo lugar, **quién está ocupado y cuándo** dentro de una
+agrupación estudiantil. Cada miembro aporta su horario de clases (PDF, imagen o captura) y,
+opcionalmente, su horario laboral; la aplicación los consolida y responde a la pregunta que
+realmente importa al coordinar reuniones: **¿cuándo estamos todos libres?**
 
-El nombre del archivo es el nombre de la persona: `Juan Pérez.pdf` → Juan Pérez.
-Acepta **PDF** (lectura exacta) e **imágenes** (con OCR y revisión obligatoria), y también
-se puede teclear el horario a mano.
+Diseñada para varias agrupaciones en una misma instalación, con datos aislados entre sí.
 
-## Cómo funciona
+## Contenido
 
-- **Semana** — rejilla de lunes a viernes, como la tabla del horario impreso: cada bloque es
-  un tramo ocupado y el blanco es tiempo libre. Al pulsar un bloque se abre ese día.
-- **Pista del día** — una regla horaria con una barra por tramo (más alta cuanta más gente
-  en clase), los huecos etiquetados en ámbar y una línea que marca la hora actual.
-- **Horario laboral** — desde la ficha de una persona se le añaden franjas de trabajo, que
-  cuentan como ocupación igual que las clases. También se puede dar de alta a alguien que
-  solo trabaja, sin PDF.
-- **Tramos** — los bloques seguidos de una persona se unen si la pausa es de 10 min o menos,
-  así un horario de 7:00 a 11:55 sale como un solo rango y no como seis bloques.
-- **Detalle** — al pulsar un nombre se abre su semana con materia, aula y marcas `(L)`, `(B)`.
-- **Informe de subida** — cada archivo se procesa por separado. Los que fallan salen primero,
-  con su nombre exacto y el motivo; uno roto no bloquea a los demás.
-- **Imágenes** — una captura del horario se lee con OCR **en el navegador** de quien la sube
-  (Tesseract desde CDN; el servidor de Vercel no tiene el binario). Lo que sale es una
-  propuesta editable: no se guarda nada hasta que el admin la revisa. Al guardar reemplaza
-  las clases de esa persona y deja intacto su horario de trabajo.
-- **A mano** — desde la ficha de una persona se añade, **edita** y borra cualquier bloque, da
-  igual si vino de un PDF, de una imagen o se tecleó. Editar permite corregir la hora, el día,
-  la materia, el aula, o convertir una clase en trabajo.
-- **Borrar horarios** — Ajustes → Horarios lista a todo el mundo con su archivo y su fecha,
-  para borrar uno a uno o vaciar la agrupación entera. También desde el detalle de la persona.
+- [Características](#características)
+- [Roles y permisos](#roles-y-permisos)
+- [Arquitectura](#arquitectura)
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Puesta en marcha local](#puesta-en-marcha-local)
+- [Despliegue](#despliegue)
+- [Operación](#operación)
+- [Modelo de datos](#modelo-de-datos)
+- [API](#api)
+- [Seguridad](#seguridad)
+- [Pruebas](#pruebas)
+- [Limitaciones conocidas](#limitaciones-conocidas)
 
-## Cuentas y permisos
+## Características
 
-| Quién | Puede |
+**Consulta**
+
+- **Vista semanal** de lunes a viernes, con la disposición de la tabla de horario impreso. Cada
+  bloque indica cuántas personas están ocupadas y quiénes; el espacio en blanco es tiempo libre.
+  La rejilla se ajusta al alto de la ventana.
+- **Vista por día**, con una regla horaria que destaca los huecos libres y marca la hora actual.
+- **Ficha por persona**, con su semana completa, materia, aula y marcas de laboratorio o grupo.
+- **Búsqueda por nombre**, insensible a tildes y mayúsculas.
+- Los bloques consecutivos de una misma persona se unen cuando la pausa es de 10 minutos o menos.
+
+**Carga de horarios**
+
+- **PDF**: lectura exacta de la tabla del horario, celda por celda.
+- **Imagen**: reconocimiento óptico (OCR) ejecutado en el navegador. El resultado es una
+  propuesta editable y **nunca se guarda sin revisión**.
+- **Entrada manual**: alta, edición y borrado de cualquier bloque, sea cual sea su origen.
+- **Horario laboral**: franjas de trabajo que cuentan como ocupación igual que una clase.
+- **Informe de subida** por archivo, con el nombre exacto y el motivo de cada fallo; un archivo
+  defectuoso no bloquea al resto.
+- **Clases virtuales excluidas**: las que no ocupan físicamente a nadie no cuentan como tiempo
+  ocupado (véase [Limitaciones conocidas](#limitaciones-conocidas)).
+
+**Administración**
+
+- Cuentas propias, agrupaciones aisladas y flujo de solicitud de acceso con aprobación.
+- Gestión de miembros restringida a la cuenta principal de cada agrupación.
+- Alta inicial desde la propia web, sin acceso a la base de datos.
+
+## Roles y permisos
+
+| Rol | Horarios | Personas y accesos |
+|---|---|---|
+| **Superadmin** | Todas las agrupaciones | Crea y elimina agrupaciones, aprueba solicitudes y reasigna la cuenta principal |
+| **Cuenta principal** | Subir, editar y borrar | **Única** que añade, quita y da permisos a los miembros |
+| **Administrador** | Subir, editar y borrar | Sin acceso a la gestión de personas |
+| **Solo ver** | Consultar y buscar | — |
+
+- La **cuenta principal** de una agrupación es la del correo inicial: el primer administrador que
+  aprueba el superadmin. No puede ser eliminada ni degradada.
+- Quien se añade a una agrupación entra como **solo ver**; ascenderlo a administrador es decisión
+  exclusiva de la cuenta principal.
+- Cualquier persona puede solicitar acceso desde la web, pero no ve nada hasta ser aprobada.
+- Una cuenta puede pertenecer a varias agrupaciones.
+- Para quien no es miembro, una agrupación responde `404`: no revela su existencia.
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    B["Navegador<br/>JavaScript nativo (ES modules)<br/>Tesseract.js para OCR"]
+    C["CDN de Vercel<br/>public/"]
+    F["Función Python en Vercel<br/>FastAPI"]
+    P[("PostgreSQL<br/>esquema horarios")]
+
+    B -- "HTML · CSS · JS" --> C
+    B -- "HTTPS + cookie de sesión" --> F
+    F -- "psycopg · DATABASE_URL" --> P
+```
+
+| Capa | Tecnología |
 |---|---|
-| **Superadmin** | Crear y eliminar agrupaciones, aprobar solicitudes; las ve todas |
-| **Cuenta principal** de una agrupación | Todo lo de admin, y además es la única que añade, quita y da permisos a la gente |
-| **Admin** | Subir y borrar horarios. No toca a las personas |
-| **Solo ver** | Consultar y buscar dentro de su agrupación |
+| Interfaz | HTML, CSS y JavaScript nativo (ES modules); sin paso de compilación |
+| API | Python · FastAPI |
+| Lectura de PDF | pdfplumber |
+| OCR | Tesseract.js, cargado desde CDN y ejecutado en el navegador |
+| Base de datos | PostgreSQL (Supabase u otro) · SQLite en desarrollo |
+| Acceso a datos | psycopg 3, SQL escrito una sola vez para ambos motores |
+| Alojamiento | Vercel (contenido estático + función Python) |
 
-La cuenta principal es la del **correo inicial**: el primer admin que aprobó el superadmin
-para esa agrupación. No se puede quitar ni degradar. El superadmin puede reasignarla desde
-Ajustes → Agrupaciones, que también sirve para las agrupaciones creadas antes de esta regla. Quien añade a alguien entra como
-**solo ver** por defecto; ascender a admin lo decide únicamente la cuenta principal.
+**Decisiones de diseño relevantes**
 
-Cualquiera puede pedir acceso desde la web, pero queda esperando a que el superadmin lo
-apruebe. La cuenta principal también puede dar de alta a gente directamente. Una persona
-puede estar en varias agrupaciones. Los datos de cada una están separados: a quien no es
-miembro, la agrupación le responde 404 y ni siquiera sabe que existe.
+- **Un único SQL para dos motores.** Las consultas usan `?` y tablas `horarios.*`; en SQLite el
+  archivo se adjunta con ese mismo nombre de esquema. El esquema de SQLite se deriva de
+  `db/schema.sql`, que es la fuente única.
+- **OCR en el cliente.** El entorno de funciones de Vercel no incluye el binario de Tesseract, y
+  vendorizarlo sería pesado. Correr en el navegador evita esa dependencia y mantiene los datos
+  fuera del servidor hasta que el usuario los confirma.
+- **Cada archivo, una petición.** Vercel limita el tamaño de cada petición; subirlos por
+  separado además aísla los fallos.
 
-## Estructura
+## Estructura del repositorio
 
 ```
-public/            interfaz (Vercel la sirve como estática)
-api/index.py       punto de entrada de la función Python
+api/index.py         Punto de entrada de la función Python
 lib/
-  parser.py        lee la tabla del PDF
-  schedule.py      une bloques y calcula los tramos del día
-  repo.py          todas las consultas SQL
-  db.py            Postgres si hay DATABASE_URL, SQLite si no
-  routes/          auth, groups, data
-db/schema.sql      esquema `horarios` (fuente única)
-db/migrations.sql  cambios sobre bases ya creadas; la app los aplica sola al arrancar
-scripts/manage.py  migrar y crear la primera cuenta
-tests/             pruebas de la API
+  parser.py          Lectura de la tabla del PDF y regla de clases virtuales
+  schedule.py        Unión de bloques y cálculo de tramos por día
+  repo.py            Todas las consultas SQL
+  db.py              Conexión: Postgres si hay DATABASE_URL, SQLite si no
+  security.py        Contraseñas (scrypt) y tokens de sesión
+  deps.py            Dependencias de FastAPI: sesión y permisos por agrupación
+  fixes.py           Correcciones de datos de una sola aplicación
+  routes/            auth · setup · groups · data
+public/
+  index.html         Documento de entrada
+  css/app.css        Estilos
+  js/
+    app.js           Interfaz y estado
+    api.js           Cliente de la API
+    dom.js           Utilidades de DOM y formato
+    ocr.js           Lectura de imágenes y reparto en celdas
+db/
+  schema.sql         Esquema completo (fuente única)
+  migrations.sql     Cambios sobre bases ya creadas
+scripts/manage.py    Administración desde la terminal
+tests/               Pruebas de API y del analizador del OCR
 ```
 
-## Desplegar
+## Puesta en marcha local
 
-1. **Base de datos** (Supabase u otro Postgres): aplica el esquema.
-   ```
-   export DATABASE_URL='postgresql://…?sslmode=require'
-   python -m scripts.manage migrate
-   ```
-   También sirve pegar `db/schema.sql` en el SQL Editor de Supabase. Es idempotente.
-2. **Primera cuenta** (la contraseña se pide por teclado):
-   ```
-   python -m scripts.manage create-user tu@correo.com "Tu Nombre" --superadmin
-   ```
-   Si tu red bloquea el puerto de Postgres (5432/6543), añade `--sql`: no conecta,
-   calcula el hash en local e imprime el `INSERT` para pegarlo en el SQL Editor.
-3. **Vercel**: importa el repo y define `DATABASE_URL`. Despliega con `vercel --prod`.
+Requisitos: Python 3.12 o superior y Node.js (solo para la prueba del OCR).
 
-Desde la web, el superadmin crea las agrupaciones (GREB, Eurus…) y cada admin añade a su gente.
-
-## Desarrollo local
-
-```
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn api.index:app --port 8765        # http://localhost:8765
-.venv/bin/python -m pytest tests -q
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/uvicorn api.index:app --port 8765     # http://localhost:8765
 ```
 
-Sin `DATABASE_URL` usa un `data.db` SQLite y crea las tablas solo. Con ella, habla con Postgres.
+Sin `DATABASE_URL`, la aplicación usa un archivo `data.db` (SQLite) y crea las tablas sola. Con
+esa variable definida se conecta a PostgreSQL.
 
-## Notas
+## Despliegue
 
-- Las contraseñas se guardan con scrypt. La sesión va en una cookie `httpOnly` de 7 días y en
-  la base solo queda su hash. Cinco intentos fallidos bloquean el correo 15 minutos.
-- Cambiar la contraseña cierra las demás sesiones.
-- Cada subida va en su propia petición: Vercel limita cada una a ~4,5 MB.
-- **Clases virtuales fuera**: si en el código del sitio, donde iría el primer dígito de un aula
-  física (`3-405`), hay una **N** (`3-N03`), es una clase virtual y no ocupa a nadie en la
-  universidad: ni el PDF ni el OCR la guardan. Los números que rodean a la N no importan
-  (`Salón 2-N01`, `aula 4-N09`...). Vale igual «Salón» que «aula». El informe de subida dice
-  cuántas se dejaron fuera.
-- **Limpiezas de datos**: si un cambio de reglas obliga a corregir lo ya guardado, `lib/fixes.py`
-  lo aplica solo, una vez, al arrancar, y lo anota en `applied_migrations` para no repetirlo.
-  `GET /api/setup` devuelve `applied` con lo que hizo cada una. Así las clases virtuales que
-  ya estaban guardadas se borraron sin tocar la base a mano. Teclear o editar una clase con
-  sitio virtual se rechaza, para que no vuelvan a entrar.
-- El lector espera la tabla `HORAS × días` de los horarios de la UTP (Crystal Reports), con
-  texto seleccionable. Un PDF escaneado se rechaza con ese motivo en vez de adivinar.
-- **El OCR no es exacto** y por eso la revisión es obligatoria: en la prueba con una captura
-  del PDF de ejemplo leyó 17 de 18 bloques y confundió alguna marca `(L)`. Sirve para no
-  teclearlo todo, no para confiar a ciegas.
-- **Migraciones**: `db/migrations.sql` se aplica solo, una vez por proceso, cuando la app
-  detecta que falta algún cambio. Es así porque quien administra no puede abrir el puerto de
-  Postgres desde su red. `GET /api/setup` devuelve `migrated` para comprobarlo desde fuera.
+1. **Base de datos.** Cualquier PostgreSQL con conexión estándar. En Supabase, usar el
+   *transaction pooler* (puerto `6543`).
+2. **Vercel.** Importar el repositorio y definir la variable de entorno de la tabla siguiente.
+3. **Desplegar** con `vercel --prod` o mediante la integración con GitHub.
+4. **Primera cuenta.** Al abrir la web por primera vez, con la base todavía sin cuentas, aparece
+   una pantalla para crear la cuenta principal. Crea las tablas si faltan y otorga el rol de
+   superadmin. **Se cierra sola** en cuanto existe una cuenta.
 
-## Primera cuenta
+| Variable | Obligatoria | Descripción |
+|---|---|---|
+| `DATABASE_URL` | Sí (producción) | Cadena de conexión de PostgreSQL |
+| `HORARIOS_SQLITE` | No | Ruta del archivo SQLite en desarrollo (por defecto `data.db`) |
+| `HORARIOS_PASSWORD` | No | Contraseña para `manage.py create-user`, en lugar de pedirla por teclado |
 
-Al abrir la web por primera vez, cuando la base todavía no tiene ninguna cuenta,
-aparece una pantalla para crear la tuya: crea las tablas si faltan y te deja como
-superadmin. **Se cierra sola** en cuanto existe una cuenta, y a partir de ahí las
-demás se crean desde Ajustes → Miembros.
+Configuración de la función (`vercel.json`): duración máxima de 30 s e inclusión de `db/**`
+en el paquete, necesaria para aplicar el esquema desde la propia aplicación.
+
+## Operación
+
+### Migraciones y correcciones de datos
+
+Pensado para entornos donde quien administra **no puede alcanzar el puerto de PostgreSQL** desde
+su red:
+
+- **`db/migrations.sql`** contiene cambios de esquema idempotentes. La aplicación los aplica sola,
+  con un candado de base de datos, cuando detecta que falta alguno.
+- **`lib/fixes.py`** contiene correcciones de datos que se ejecutan **una sola vez** y quedan
+  registradas en `horarios.applied_migrations`.
+- `GET /api/setup` devuelve `migrated` y `applied`, lo que permite comprobar desde fuera qué se
+  aplicó y con qué resultado.
+
+Al añadir una migración de esquema, hay que incorporar su columna a `_ESPERADAS` en `lib/db.py`.
+
+### Administración desde la terminal
+
+```bash
+python -m scripts.manage migrate                                       # aplica db/schema.sql
+python -m scripts.manage create-user correo@ejemplo.com "Nombre" --superadmin
+python -m scripts.manage create-group "Nombre de la agrupación"
+```
+
+Con `--sql`, `create-user` no se conecta: calcula el hash localmente e imprime la sentencia
+`INSERT` para ejecutarla en el editor SQL del proveedor.
+
+## Modelo de datos
+
+Todo vive en el esquema `horarios`.
+
+| Tabla | Contenido |
+|---|---|
+| `users` | Cuentas: correo, nombre, hash de contraseña, marca de superadmin |
+| `sessions` | Sesiones activas; guarda el hash del token, nunca el token |
+| `login_failures` | Intentos fallidos, para el bloqueo temporal |
+| `groups` | Agrupaciones y su cuenta principal (`owner_user_id`) |
+| `memberships` | Pertenencia de cuentas a agrupaciones y rol (`admin` / `member`) |
+| `requests` | Solicitudes de acceso pendientes de aprobación |
+| `people` | Personas cuyo horario se gestiona, por agrupación |
+| `blocks` | Bloques de horario; `kind` distingue `clase` de `trabajo` |
+| `applied_migrations` | Correcciones de datos ya aplicadas |
+
+Al eliminar una agrupación se eliminan en cascada sus personas y bloques.
+
+## API
+
+Todas las rutas cuelgan de `/api`. Salvo las marcadas como públicas, exigen sesión.
+
+| Método y ruta | Rol requerido | Función |
+|---|---|---|
+| `POST /auth/login` · `POST /auth/logout` · `GET /auth/me` | Público / sesión | Sesión |
+| `POST /auth/register` · `GET /auth/groups` | Público | Solicitar acceso |
+| `POST /auth/password` | Sesión | Cambiar contraseña |
+| `GET /setup` · `POST /setup` | Público | Estado de instalación y alta inicial |
+| `GET /groups` · `POST /groups` | Superadmin | Listar y crear agrupaciones |
+| `PUT /groups/{slug}/owner` · `DELETE /groups/{slug}` | Superadmin | Cuenta principal · eliminar |
+| `GET /requests` · `POST /requests/{id}/approve` · `DELETE /requests/{id}` | Superadmin | Solicitudes |
+| `GET /g/{slug}/members` · `PUT` · `DELETE …/{user_id}` | Cuenta principal | Gestión de personas |
+| `GET /g/{slug}/schedule` · `/people` · `/person` | Miembro | Consulta |
+| `POST /g/{slug}/upload` | Administrador | Subir PDF |
+| `POST /g/{slug}/blocks` · `PUT` · `DELETE /g/{slug}/block/{id}` | Administrador | Bloques manuales |
+| `DELETE /g/{slug}/person` · `DELETE /g/{slug}/people` | Administrador | Borrar horarios |
+
+## Seguridad
+
+- **Contraseñas**: scrypt (`n=2¹⁴`, `r=8`, `p=1`) con sal aleatoria; mínimo de 8 caracteres.
+- **Sesiones**: cookie `HttpOnly`, `SameSite=Lax` y `Secure` bajo HTTPS, con caducidad de 7 días.
+  En la base solo se almacena el hash SHA-256 del token.
+- **Fuerza bruta**: cinco intentos fallidos bloquean el correo durante 15 minutos. Si el correo no
+  existe, se realiza el mismo cálculo de hash para no revelarlo por el tiempo de respuesta.
+- **Aislamiento**: cada consulta de horarios se filtra por agrupación; el acceso se comprueba en
+  el servidor en cada petición.
+- **Cambio de contraseña**: cierra las demás sesiones de la cuenta.
+- **Base de datos**: RLS activado en todas las tablas por si el esquema llegara a exponerse.
+- **Interfaz**: el contenido de archivos y nombres se inserta siempre como texto, nunca como HTML.
+
+## Pruebas
+
+```bash
+.venv/bin/python -m pytest tests -q         # API: permisos, aislamiento, cargas, correcciones de datos
+node tests/ocr.test.mjs                     # analizador del OCR
+```
+
+Las pruebas de API usan SQLite y cubren, entre otros aspectos: permisos por rol, aislamiento entre
+agrupaciones, bloqueo por intentos fallidos, flujo de solicitud y aprobación, edición de bloques,
+exclusión de clases virtuales y correcciones de datos.
+
+> **Nota.** Varias pruebas cargan un horario de ejemplo llamado `HorarioClase.pdf` en la raíz del
+> proyecto. El archivo no se versiona, porque `*.pdf` está excluido para no publicar horarios
+> reales. Para ejecutarlas hace falta colocar allí un horario del mismo formato.
+
+## Limitaciones conocidas
+
+- **Formato del PDF.** El lector espera la tabla `HORAS × días` de los horarios de la UTP, con
+  texto seleccionable. Un PDF escaneado se rechaza con ese motivo en lugar de adivinar.
+- **OCR no exacto.** En la prueba con una captura del horario de ejemplo leyó 17 de 18 bloques.
+  Por eso la revisión previa es obligatoria y los códigos de aula con formato dudoso se marcan.
+- **Clases virtuales.** Se descartan las que tienen la letra **N** donde iría el primer dígito de
+  un aula física: `Salón 2-N01` es virtual, `aula 3-405` no. Los números que rodean a la N no
+  importan. Se aplica a PDF, imágenes y entrada manual, y también se corrigieron los datos que ya
+  estaban guardados.
+- **Tamaño de subida.** Cada PDF puede pesar hasta 4 MB por el límite de peticiones de Vercel.
+- **Primera carga del OCR.** El lector se descarga la primera vez (unos 12 MB) y luego queda en
+  caché del navegador.

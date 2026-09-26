@@ -613,14 +613,51 @@ button.chip { cursor: pointer; font: inherit; font-size: 13px; }
   }
 }
 
+/* --- El sorteo, a pantalla completa ----------------------------------------
+   El fondo se difumina y la rueda se va cuando ya ha salido el nombre. */
+.sorteo-fondo {
+  position: fixed; inset: 0; z-index: 70;
+  display: grid; place-items: center; padding: 14px;
+  background: rgb(10 20 18 / .55);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  opacity: 0; transition: opacity .26s ease;
+}
+.sorteo-fondo.abierta { opacity: 1; }
+.sorteo-tap { position: absolute; inset: 0; }
+.sorteo-caja {
+  position: relative; width: min(540px, 100%);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 20px 18px 18px; border-radius: 18px;
+  background: var(--card); box-shadow: 0 30px 80px rgb(0 0 0 / .45);
+  transform: scale(.95); transition: transform .3s cubic-bezier(.2, .8, .3, 1);
+}
+.sorteo-fondo.abierta .sorteo-caja { transform: none; }
+body.con-sorteo { overflow: hidden; }
+.sorteo-cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 7px; }
+.sorteo-cab b { font-size: 16px; }
+.sorteo-pie { margin-top: 2px; }
+
 /* --- La ruleta ------------------------------------------------------------
    Un sector por persona, girando de verdad y parando en el ganador. El
-   grupo .rueda-giro es lo que rota; el puntero de arriba no se mueve. */
-.ruleta-caja { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 6px 0 2px; }
-.rueda-marco { position: relative; width: 220px; max-width: 100%; }
-.rueda { display: block; width: 100%; height: auto; filter: drop-shadow(0 6px 14px rgb(0 0 0 / .12)); }
-.rueda-n { font-weight: 600; pointer-events: none; }
-.rueda-giro { transition: transform 3.4s cubic-bezier(.12, .72, .14, 1); will-change: transform; }
+   grupo .rueda-giro es lo que rota; el puntero de arriba no se mueve. Los
+   nombres van derechos en el centro de su sector, que es la única manera de
+   que se lean: girados con la rueda, la mitad salen del revés. */
+[hidden] { display: none !important; }
+.ruleta-caja { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ruleta-caja.saliendo { animation: sale-rueda .45s ease forwards; }
+@keyframes sale-rueda { to { opacity: 0; transform: scale(.86); } }
+.rueda-marco { position: relative; width: min(58vmin, 320px); max-width: 100%; }
+.rueda { display: block; width: 100%; height: auto; filter: drop-shadow(0 8px 18px rgb(0 0 0 / .16)); }
+.rueda-n { font-weight: 600; fill: var(--ink); pointer-events: none; }
+.rueda-giro { will-change: transform; }
+.rueda-hub {
+  /* El nombre de quien está debajo del puntero, en el hueco del centro. */
+  position: absolute; left: 50%; top: 50%; translate: -50% -50%;
+  width: 34%; display: grid; place-items: center; text-align: center;
+  padding: 4px; border-radius: 50%; overflow: hidden;
+  font: 700 clamp(10px, 2.6vmin, 13px)/1.05 var(--body);
+  letter-spacing: -.01em; pointer-events: none;
+}
 .rueda-flecha {
   /* La punta del triángulo justo en el borde de la rueda: señala, no tapa. */
   position: absolute; top: -15px; left: 50%; translate: -50% 0;
@@ -628,13 +665,37 @@ button.chip { cursor: pointer; font: inherit; font-size: 13px; }
   filter: drop-shadow(0 1px 1px rgb(0 0 0 / .3));
 }
 .rueda-pie { margin: 0; font-size: 12px; color: var(--muted); }
-.ruleta-caja.girando .rueda { animation: rule-temble 0.16s linear infinite; }
-@keyframes rule-temble { 0%, 100% { rotate: -1.2deg; } 50% { rotate: 1.2deg; } }
+.ruleta-caja.girando .rueda { animation: rule-temble .17s linear infinite; }
+@keyframes rule-temble { 0%, 100% { rotate: -1.4deg; } 50% { rotate: 1.4deg; } }
 .ruleta-caja.girando .rueda-pie { color: var(--ink); font-weight: 600; }
+
+/* Los nombres, ya parado el reparto. */
+.sorteo-salida { width: 100%; text-align: center; }
+.sorteo-fondo.abierta .sorteo-salida { animation: sale-nombres .5s ease both; }
+@keyframes sale-nombres { from { opacity: 0; transform: translateY(12px); } }
+.sorteo-quien { margin: 0 0 6px; font-size: 16px; color: var(--muted); }
+.sorteo-quien b {
+  display: block; color: var(--ink); letter-spacing: -.02em;
+  font: 700 clamp(28px, 8vmin, 44px)/1.05 var(--display);
+}
+.sorteo-salida .hint { margin: 4px 0 0; }
 
 .sorteo { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .sorteo-out { margin: 6px 0; font-size: 15px; }
 @media (prefers-reduced-motion: reduce) {
-  .rueda-giro { transition: none !important; }
   .ruleta-caja.girando .rueda { animation: none; }
+  .sorteo-fondo, .sorteo-caja, .ruleta-caja.saliendo { transition: none; }
+  .sorteo-fondo.abierta .sorteo-salida { animation: none; }
 }
+
+/* En "Cuándo" está primero quien puede venir; los que no, plegados debajo. */
+.fuera { margin-top: 8px; }
+.fuera > summary {
+  cursor: pointer; font-size: 13px; color: var(--muted);
+  list-style: none; display: inline-flex; align-items: center; gap: 6px;
+}
+.fuera > summary::-webkit-details-marker { display: none; }
+.fuera > summary::before { content: "▸"; font-size: 11px; }
+.fuera[open] > summary::before { content: "▾"; }
+.fuera > summary:hover { color: var(--ink); }
+.fuera .chips { margin-top: 6px; }

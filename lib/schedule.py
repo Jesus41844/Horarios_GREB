@@ -76,8 +76,8 @@ def free_windows(rows, roster, days, desde: int, hasta: int, duracion: int,
 
     Unir ventanas contiguas en un solo tramo no agranda la promesa: si A, B y C
     están libres en cada una de ellas, están libres en todo el hueco que las
-    cubre. Los que quedan en `ocupados` son los que no pueden el tramo entero,
-    que es justo lo que hay que saber antes de escribir la convocatoria.
+    cubre. `disponibles` son sus nombres, que es lo que se quiere ver: a quién
+    se puede convocar. `ocupados` son los que no pueden el tramo entero.
 
     `roster` son todas las personas de la agrupación, también las que no tienen
     bloques: quien no aparece en ninguna fila está libre siempre, y cuenta.
@@ -136,6 +136,7 @@ def _tramo(day: int, tramo, nombres, libres_de) -> dict:
         "minutes": b - a,
         "libres": len(libres),
         "total": len(nombres),
+        "disponibles": libres,
         "ocupados": [n for n in nombres if n not in libres],
     }
 

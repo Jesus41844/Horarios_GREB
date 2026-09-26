@@ -49,8 +49,9 @@ duración pedida y devuelve los tramos con más gente libre a la vez, de mejor a
   huecos los decide quien pregunta.
 - Los tramos contiguos con el mismo mejor resultado se unen en uno solo: si A, B y C están libres en
   cada ventana, lo están en todo el hueco que las cubre.
-- Cada tramo dice **quién se queda fuera** en el tramo entero, que es justo lo que hay que saber
-  antes de escribir la convocatoria.
+- Cada tramo enseña **quién puede venir** (los nombres libres del tramo entero) y el recuento
+  "X de Y libres". Quien no puede se esconde detrás de un "No pueden: N", para no tener que leerlo
+  todo: lo que se busca es a quién se convoca.
 - Quien no tiene ningún bloque cuenta como libre siempre, y entra en el cómputo.
 
 **Carga de horarios**
@@ -80,9 +81,13 @@ conteo, y son dos clases de actividad:
   para decir quién está libre en dos días a la vez.
 - **Editar y eliminar**: la ✎ corrige la ficha sin tocar el reparto ya hecho; la ✕ borra la actividad
   y su conteo.
-- **Rueda de verdad**: un sector por persona del bombo, que se pone a girar al darle al botón y se
-  para con el ganador bajo el puntero. El bombo que se ve es el mismo que se sortea, y con menos
-  movimiento (si el sistema lo pide) sale el resultado sin girar.
+- **Rueda de verdad**: un sector por persona del bombo, con el nombre **derecho** en el centro de su
+  sector (girado con la rueda, la mitad de los nombres se leerían del revés). El bombo que se ve es el
+  mismo que se sortea, y con menos movimiento (si el sistema lo pide) sale el resultado sin girar.
+- **A pantalla completa**: al darle al botón, la rueda ocupa la pantalla y el fondo se difumina. Al
+  pararse, la rueda se va y quedan solo los nombres de quien salió, grandes; mientras gira no se puede
+  cerrar, y con `Esc` o con "Listo" se vuelve a los ajustes. El reparto ya está guardado en el
+  servidor, así que se registra aunque se cierre la pantalla.
 - **Strikes**: botones rápidos de `+1` y `−1` por persona, con un motivo opcional. El peso en la
   sorteo es `1 + 1,5 × strikes`, así que quien más tiene, más urge que salga.
 - **Descanso**: quien salió en la actividad anterior del mismo modo no entra en la siguiente. Se puede
@@ -284,7 +289,7 @@ Todas las rutas cuelgan de `/api`. Salvo las marcadas como públicas, exigen ses
 | `GET /requests` · `POST /requests/{id}/approve` · `DELETE /requests/{id}` | Superadmin | Solicitudes |
 | `GET /g/{slug}/members` · `PUT` · `DELETE …/{user_id}` | Cuenta principal | Gestión de personas |
 | `GET /g/{slug}/schedule` · `/people` · `/person` | Miembro | Consulta |
-| `GET /g/{slug}/libre` | Miembro | Tramos con más gente libre |
+| `GET /g/{slug}/libre` | Miembro | Tramos con más gente libre, con los nombres de quien puede y de quien no |
 | `GET /g/{slug}/ruleta` | Miembro | Padrón con strikes y participaciones, actividades y el bombo de cada una |
 | `PUT /g/{slug}/person` | Administrador | Corregir el nombre del padrón |
 | `POST /g/{slug}/actividades` · `PUT` · `DELETE /g/{slug}/actividad/{id}` | Administrador | Alta, edición y borrado de actividades |

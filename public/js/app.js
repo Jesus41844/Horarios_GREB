@@ -29,7 +29,6 @@ const S = {
   ruletaError: null,
   ajustes: "cuenta",   // sección del sidebar de Ajustes que está abierta
   girando: null,  // id de la actividad que se está girando ahora
-  vueltas: 0,     // por dónde va la rueda mientras espera al reparto
   ultimo: null,   // último sorteo, para enseñarlo debajo de la actividad
   editando: null, // id de la actividad abierta en el formulario de edición
   borrador: null, // lo que se está escribiendo: vive aquí para que al repintar
@@ -403,16 +402,21 @@ function viewCuando() {
 
   out.push(el("p", { className: "hint", textContent:
     `${q.resultados.length} ${q.resultados.length === 1 ? "tramo" : "tramos"}, de mejor a peor.` }));
-  out.push(...q.resultados.slice(0, 25).map((h) => {
-    const libres = h.total - h.ocupados.length;
-    return el("section", { className: "card hueco" },
-      el("div", { className: "hueco-cab" },
-        el("b", { textContent: `${DAYS[h.day]} ${fmtRange(h.start, h.end)}` }),
-        el("span", { className: "hueco-n", textContent: `${libres} de ${h.total} libres` })),
-      el("div", { className: "chips" },
-        ...h.ocupados.map((n) => el("span", { className: "chip fuera", textContent: n })),
-        h.ocupados.length ? null : el("span", { className: "chip ok", textContent: "Todo el padrón libre" })));
-  }));
+  out.push(...q.resultados.slice(0, 25).map((h) => el("section", { className: "card hueco" },
+    el("div", { className: "hueco-cab" },
+      el("b", { textContent: `${DAYS[h.day]} ${fmtRange(h.start, h.end)}` }),
+      el("span", { className: "hueco-n", textContent: `${h.libres} de ${h.total} libres` })),
+    // Quién puede venir, que es lo que se busca; el que no puede, aparte.
+    h.libres
+      ? el("div", { className: "chips" },
+        ...h.disponibles.map((n) => el("span", { className: "chip ok", textContent: n })))
+      : el("p", { className: "hint", textContent: "No se libra nadie el tramo entero." }),
+    h.ocupados.length
+      ? el("details", { className: "fuera" },
+        el("summary", { textContent: `No pueden: ${h.ocupados.length}` }),
+        el("div", { className: "chips" },
+          ...h.ocupados.map((n) => el("span", { className: "chip fuera", textContent: n }))))
+      : null)));
   return out;
 }
 
@@ -675,7 +679,6 @@ function tarjetaActividad(a) {
           cargarRuleta({ force: true });
         },
       })),
-    S.ultimo?.id === a.id ? null : ruletaCaja(a, S.girando === a.id),
     a.participantes.length
       ? el("div", { className: "chips" }, ...a.participantes.map((n) => el("span", { className: "chip on" },
         n,
@@ -692,48 +695,31 @@ function tarjetaActividad(a) {
  *  movimiento, sale el resultado sin girar. */
 async function girar(a) {
   S.girando = a.id;
-  S.ultimo = null;
-  // Arranca girando ya, sin esperar al servidor: quien le dio al botón ve la
-  // rueda en marcha mientras se decide, y luego se para en el ganador.
-  S.vueltas = 5 + Math.floor(Math.random() * 3);
-  repintarAjustes();
+  const capa = abrirSorteo(a);
+  capa.rueda.arrancar();          // empieza a girar antes de que conteste el servidor
   let r;
   try {
     // Sin mandar cuántas: se usan las que pide la actividad, que es lo escrito.
     r = await api.girar(S.slug, a.id, {});
   } catch (err) {
     S.girando = null;
-    S.vueltas = 0;
-    repintarAjustes();
+    cerrarSorteo();
     return alert(err.message);
   }
+  await capa.rueda.aterrizar(r);  // se para con el ganador bajo el puntero
+  // Un momento de parada: la rueda ya está quieta y aún está en pantalla.
+  await new Promise((listo) => setTimeout(listo, sinMovimiento() ? 0 : 900));
+  const nombres = salidaSorteo(r);
+  capa.salida.replaceWith(nombres);
+  capa.rueda.desvanecer();
+  capa.boton.hidden = false;      // ya se puede cerrar
+  capa.boton.focus();
   S.girando = null;
-  S.vueltas = 0;
   S.ultimo = { id: a.id, ...r };
-  // Al volver no solo sale el reparto: quien sale deja de estar en el bombo y su
-  // strike se queda a cero, así que hay que releerlo todo antes de girar.
+  // El reparto ya está en el servidor (por eso salvan las Participation). Al
+  // volver, quien sale deja de estar en el bombo y su strike se queda a cero.
   await cargarRuleta({ force: true });
   repintarAjustes();
-  const destino = document.querySelector(`.ruleta-caja[data-act="${a.id}"]`);
-  if (destino) await girarRueda(destino, r);
-}
-
-/** Le da varias vueltas y para con el sector de quien salió bajo el puntero. */
-function girarRueda(caja, r) {
-  const g = caja.querySelector(".rueda-giro");
-  const elegido = r.elegidos[0];
-  const sector = g && [...g.querySelectorAll("[data-nombre]")].find((n) => n.dataset.nombre === elegido?.name);
-  if (!sector) return Promise.resolve();
-  const centro = Number(sector.dataset.grados) + Number(sector.dataset.ancho) / 2;
-  const vueltas = 5 + Math.floor(Math.random() * 3);
-  const sinMovimiento = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  return new Promise((listo) => {
-    g.style.transition = sinMovimiento ? "none" : "transform 3.4s cubic-bezier(.12,.72,.14,1)";
-    g.style.transform = `rotate(${360 * vueltas - centro}deg)`;
-    if (sinMovimiento) return listo();
-    g.addEventListener("transitionend", () => listo(), { once: true });
-    setTimeout(listo, 4200);   // por si el navegador no lanza el evento
-  });
 }
 
 const NS = "http://www.w3.org/2000/svg";
@@ -743,23 +729,22 @@ const nodoSvg = (tag, attrs, texto) => {
   if (texto) n.textContent = texto;
   return n;
 };
+const sinMovimiento = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** El bombo, con un sector por persona y los nombres tumbados sobre el radio.
- *  Los sectores se construyen dentro del grupo que gira, con los grados de su
- *  centro apuntados, que es lo que luego usa el aterrizaje. */
-function rueda(pool) {
+/** El bombo, con un sector por persona. Los nombres van **derechos** en el centro
+ *  de su sector (girados con el sector se leen del revés) y el grupo entero es lo
+ *  que rota; el puntero de arriba se queda quieto. */
+function rueda(pool, { grande = false } = {}) {
   const n = pool.length;
-  const R = 100, C = 110, rint = 44;
+  const R = 100, C = 110, rint = 42;
   const svg = nodoSvg("svg", {
-    viewBox: "0 0 220 220", class: "rueda", role: "img",
-    "aria-label": `Ruleta con ${n} ${n === 1 ? "persona" : "personas"}: ${pool.map((p) => p.name).join(", ")}`,
+    viewBox: "0 0 220 220", class: `rueda${grande ? " grande" : ""}`,
+    role: "img", "aria-label": `Ruleta con ${n} ${n === 1 ? "persona" : "personas"}: ${pool.map((p) => p.name).join(", ")}`,
   });
   if (!n) {
     svg.append(nodoSvg("circle", { cx: C, cy: C, r: R, fill: "var(--line-soft)" }));
-    svg.append(nodoSvg("text", {
-      x: C, y: C, "text-anchor": "middle", "dominant-baseline": "middle",
-      fill: "var(--muted)", "font-size": 12,
-    }, "sin nadie"));
+    svg.append(nodoSvg("text", { x: C, y: C, "text-anchor": "middle", "dominant-baseline": "middle",
+      fill: "var(--muted)", "font-size": 13 }, "nadie"));
     return svg;
   }
   const g = nodoSvg("g", { class: "rueda-giro" });
@@ -767,8 +752,8 @@ function rueda(pool) {
   const ancho = 360 / n;
   const rad = (x) => (x * Math.PI) / 180;
   pool.forEach((p, i) => {
-    // El sector arranca en -90° para que el primer sector quede arriba, donde
-    // está el puntero, en lugar de a la derecha como en un reloj.
+    // El primer sector arranca arriba, donde está el puntero, y no a la derecha
+    // como en un reloj: si no, el primer nombre sale siempre en el mismo lado.
     const desde = i * ancho - 90, hasta = desde + ancho;
     const x0 = C + R * Math.cos(rad(desde)), y0 = C + R * Math.sin(rad(desde));
     const x1 = C + R * Math.cos(rad(hasta)), y1 = C + R * Math.sin(rad(hasta));
@@ -779,47 +764,89 @@ function rueda(pool) {
       stroke: "var(--line)", "stroke-width": 1,
       "data-nombre": p.name, "data-grados": i * ancho, "data-ancho": ancho,
     }));
+    // Con mucha gente solo caben las iniciales; con poca, el nombre de pila.
+    const texto = n > 14 ? p.name.slice(0, 1).toUpperCase()
+      : n > 7 ? p.name.split(" ")[0].slice(0, 8) : p.name.split(" ")[0];
+    if (!texto) return;
     const medio = desde + ancho / 2;
-    const tx = C + (rint + 16) * Math.cos(rad(medio)), ty = C + (rint + 16) * Math.sin(rad(medio));
-    g.append(nodoSvg("text", {
-      x: tx.toFixed(2), y: ty.toFixed(2), class: "rueda-n",
-      "font-size": p.name.length > 11 ? 9.5 : 11.5, fill: "var(--ink)",
-      "text-anchor": medio > 90 && medio < 270 ? "end" : "start",
-      transform: `rotate(${(medio + 90).toFixed(2)} ${tx.toFixed(2)} ${ty.toFixed(2)})`,
-    }, p.name));
+    const radio = rint + (R - rint) / 2;
+    const t = nodoSvg("text", {
+      x: (C + radio * Math.cos(rad(medio))).toFixed(2),
+      y: (C + radio * Math.sin(rad(medio))).toFixed(2),
+      class: "rueda-n", "text-anchor": "middle", "dominant-baseline": "central",
+      "font-size": texto.length > 8 ? 8 : texto.length > 5 ? 9.5 : 11,
+    }, texto);
+    g.append(t);
   });
   svg.append(g);
   svg.append(nodoSvg("circle", { cx: C, cy: C, r: rint, fill: "var(--card)", stroke: "var(--line)" }));
-  svg.append(nodoSvg("circle", { cx: C, cy: C, r: 8, fill: "var(--accent)" }));
   return svg;
 }
 
-/** La caja con la rueda y el puntero, en medio de la tarjeta. */
-function ruletaCaja(a, girando) {
-  const svg = rueda(a.pool || []);
-  if (girando && S.vueltas) {
-    // A medio camino: el ángulo es de mentira, pero se ve que está girando.
-    svg.querySelector(".rueda-giro").style.transform = `rotate(${360 * S.vueltas - 37}deg)`;
-  }
-  const caja = el("div", { className: `ruleta-caja${girando ? " girando" : ""}` },
-    el("div", { className: "rueda-marco" }, svg, el("span", { className: "rueda-flecha" })),
-    el("p", {
-      className: "rueda-pie",
-      textContent: girando
-        ? "Girando…"
-        : `${(a.pool || []).length} en el bombo${a.ocupados?.length ? ` · ${a.ocupados.length} con clase` : ""}`,
-    }));
-  caja.dataset.act = a.id;
-  return caja;
+/** La rueda y su animación: arranca girando, y al aterrizar se para con el
+ *  ganador bajo el puntero. Devuelve el grupo para poder moverlo. */
+function rodar(pool) {
+  const marco = el("div", { className: "rueda-marco" });
+  const hub = el("div", { className: "rueda-hub", textContent: "" });
+  const svg = rueda(pool, { grande: true });
+  marco.append(svg, el("span", { className: "rueda-flecha" }), hub);
+  const g = svg.querySelector(".rueda-giro");
+
+  const api = {
+    nodo: el("div", { className: "ruleta-caja girando" }, marco,
+      el("p", { className: "rueda-pie", textContent: "Girando…" })),
+    /** El movimiento de partida: sin transición, a un ángulo cualquiera. */
+    arrancar() {
+      hub.textContent = "";
+      api.nodo.classList.add("girando");
+      g.style.transition = "none";
+      g.style.transform = `rotate(${360 * (4 + Math.floor(Math.random() * 3)) - 41}deg)`;
+      // Sin esto el navegador no llega a pintar el ángulo inicial y no anima nada:
+      // la transición necesita un valor anterior que pueda interpolar.
+      void g.getBoundingClientRect();
+    },
+    /** Las vueltas de verdad y el alto en el ganador. */
+    aterrizar(r) {
+      const sector = [...g.querySelectorAll("path[data-nombre]")]
+        .find((x) => x.dataset.nombre === r.elegidos[0]?.name);
+      const elegida = r.elegidos[0];
+      if (!sector) {
+        hub.textContent = elegida ? elegida.name : "";
+        return Promise.resolve();
+      }
+      const centro = Number(sector.dataset.grados) + Number(sector.dataset.ancho) / 2;
+      const vueltas = sinMovimiento() ? 0 : 6 + Math.floor(Math.random() * 3);
+      void g.getBoundingClientRect();
+      g.style.transition = sinMovimiento()
+        ? "none"
+        : "transform 4.2s cubic-bezier(.11, .78, .12, 1)";
+      g.style.transform = `rotate(${360 * vueltas - centro}deg)`;
+      hub.textContent = elegida ? elegida.name : "";
+      api.nodo.classList.remove("girando");
+      const pie = api.nodo.querySelector(".rueda-pie");
+      if (pie) pie.textContent = `${r.elegidos.length} ${r.elegidos.length === 1 ? "persona" : "personas"}`;
+      if (sinMovimiento()) return Promise.resolve();
+      return new Promise((listo) => {
+        g.addEventListener("transitionend", () => listo(), { once: true });
+        setTimeout(listo, 4600);   // por si el navegador no lanza el evento
+      });
+    },
+    /** Ya está: la rueda se va y solo quedan los nombres. */
+    desvanecer() {
+      const n = api.nodo;
+      n.classList.add("saliendo");
+      setTimeout(() => n.remove(), sinMovimiento() ? 0 : 480);
+    },
+  };
+  return api;
 }
 
-function resultadoSorteo(r) {
-  const act = S.ruleta.actividades.find((a) => a.id === r.id) || { id: r.id, pool: r.pool };
+/** Los nombres, ya parado el reparto. */
+function salidaSorteo(r) {
   const cuantos = r.elegidos.length;
-  return el("div", { className: "sorteo" },
-    ruletaCaja({ ...act, pool: r.pool.length ? r.pool : act.pool }, false),
-    el("p", { className: "sorteo-out" },
-      el("b", { textContent: r.elegidos[0].name }),
+  return el("div", { className: "sorteo-salida" },
+    el("p", { className: "sorteo-quien" },
+      el("b", { textContent: r.elegidos[0]?.name || "nadie" }),
       cuantos > 1
         ? el("span", { textContent: ` y ${r.elegidos.slice(1).map((e) => e.name).join(", ")}` })
         : null,
@@ -829,11 +856,68 @@ function resultadoSorteo(r) {
       : null,
     r.ocupados?.length
       ? el("p", { className: "hint", textContent: `Con el turno no pueden: ${r.ocupados.join(", ")}.` })
-      : null,
-    el("button", {
+      : null);
+}
+
+// --- la capa a pantalla completa -------------------------------------------
+
+let capaSorteo = null;      // el nodo abierto, el botón que lo abrió y su tecla
+let teclaSorteo = null;
+
+/** El sorteo se hace a pantalla completa, con el fondo difuminado: es un
+ *  momento de la vida de la agrupación y se ve de lejos. */
+function abrirSorteo(a) {
+  const antes = document.activeElement;
+  const ruedaGirando = rodar(a.pool || []);
+  const salida = el("div", { className: "sorteo-salida" });
+  // Mientras gira no se puede cerrar: el reparto ya está hecho y a medias se
+  // queda sin mostrar. El botón aparece con los nombres.
+  const cerrar = el("button", {
+    className: "btn", type: "button", textContent: "Listo", hidden: true,
+    onclick: () => cerrarSorteo(),
+  });
+  const caja = el("div", { className: "sorteo-caja", role: "dialog", "aria-modal": "true",
+    "aria-label": `Sorteo de ${a.nombre}` },
+    el("div", { className: "sorteo-cab" },
+      el("b", { textContent: a.nombre }),
+      el("span", { className: "tag", textContent: a.modo === "ventas" ? "todo el día" : fmtRange(a.inicio, a.fin) }),
+      el("span", { className: "tag", textContent: `${a.cuantas} ${a.cuantas === 1 ? "persona" : "personas"}` })),
+    ruedaGirando.nodo,
+    salida,
+    el("div", { className: "sorteo-pie" }, cerrar));
+  const capa = el("div", { className: "sorteo-fondo" },
+    el("div", { className: "sorteo-tap", onclick: () => cerrarSorteo() }), caja);
+  document.body.append(capa);
+  document.body.classList.add("con-sorteo");
+  capaSorteo = { capa, antes };
+  teclaSorteo = (e) => { if (e.key === "Escape") cerrarSorteo(); };
+  document.addEventListener("keydown", teclaSorteo);
+  requestAnimationFrame(() => capa.classList.add("abierta"));
+  return { rueda: ruedaGirando, salida, boton: cerrar };
+}
+
+function cerrarSorteo() {
+  if (!capaSorteo || S.girando) return;   // girando, la capa no se cierra
+  const { capa, antes } = capaSorteo;
+  capaSorteo = null;
+  if (teclaSorteo) document.removeEventListener("keydown", teclaSorteo);
+  teclaSorteo = null;
+  document.body.classList.remove("con-sorteo");
+  capa.classList.remove("abierta");
+  capa.addEventListener("transitionend", () => capa.remove(), { once: true });
+  setTimeout(() => capa.remove(), 600);
+  antes?.focus?.();
+}
+
+/** La tarjeta se queda con el reparto y con un botón para volver a girar. */
+function resultadoSorteo(r) {
+  const act = S.ruleta.actividades.find((a) => a.id === r.id);
+  return el("div", { className: "sorteo" },
+    salidaSorteo(r),
+    act ? el("button", {
       className: "btn", type: "button", textContent: "Girar otra vez",
-      onclick: () => girar(S.ruleta.actividades.find((a) => a.id === r.id)),
-    }));
+      onclick: () => girar(act),
+    }) : null);
 }
 
 /** El padrón con las strikes: el +1 y el −1 de cada uno, que es lo único que se
@@ -1327,7 +1411,10 @@ function closePanel() {
 window.addEventListener("resize", ajustarRejilla);
 
 scrim.addEventListener("click", closePanel);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanel(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || capaSorteo) return;   // con la capa abierta es ella
+  closePanel();
+});
 
 function panelHead(title, subtitle, extra) {
   return [

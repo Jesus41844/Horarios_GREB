@@ -715,19 +715,22 @@ def test_buscar_los_tramos_con_mas_gente_libre(client):
         "dias": "0,1", "desde": "07:00", "hasta": "22:00", "duracion": 60})
     assert r.status_code == 200
     huecos = r.json()
-    assert all(set(h) == {"day", "start", "end", "minutes", "libres", "total", "ocupados"}
-               for h in huecos)
+    assert all(set(h) == {"day", "start", "end", "minutes", "libres", "total",
+                          "disponibles", "ocupados"} for h in huecos)
 
     # El martes no hay nadie: se puede la agrupación entera, y sale primero.
     assert (huecos[0]["day"], huecos[0]["libres"], huecos[0]["total"]) == (1, 4, 4)
     assert (huecos[0]["start"], huecos[0]["end"]) == (420, 1320)
     assert huecos[0]["ocupados"] == []
+    # Los nombres de quien puede venir, que es lo que se enseña.
+    assert huecos[0]["disponibles"] == ["Ana Gómez", "Juan Pérez", "Luis Soto", "Marta Ruiz"]
 
     # El lunes lo mejor son tres de cuatro, y en un solo tramo: de las 12:00 al
     # final. Marta es la que no puede, y por eso aparece en vez de desaparecer.
     lunes = [h for h in huecos if h["day"] == 0]
     assert [(h["start"], h["end"], h["libres"], h["ocupados"]) for h in lunes] \
         == [(720, 1320, 3, ["Marta Ruiz"])]
+    assert lunes[0]["disponibles"] == ["Ana Gómez", "Juan Pérez", "Luis Soto"]
 
 
 def test_el_hueco_se_mide_por_la_duracion_pedida(client):

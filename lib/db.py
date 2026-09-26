@@ -21,6 +21,7 @@ MIGRATIONS_FILE = ROOT / "db" / "migrations.sql"
 # añade aquí su columna.
 _ESPERADAS = [("blocks", "kind"), ("groups", "owner_user_id"),
               ("applied_migrations", "name"), ("actividades", "modo"),
+              ("actividades", "dias"),
               ("participaciones", "person_key"), ("strikes", "veces")]
 _SENTINEL = (
     "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'horarios' "

@@ -232,12 +232,20 @@ button, input, select { font: inherit; color: inherit; }
 
 /* --- subida ------------------------------------------------------------- */
 
+/* Ahora es un botón compacto al final de la barra de vistas, no una franja
+   entera: el nombre del archivo sigue siendo el nombre de la persona. */
 .drop {
-  display: block; border: 2px dashed var(--line); border-radius: var(--radius);
-  background: var(--card); padding: 9px 14px; text-align: center; color: var(--muted);
-  cursor: pointer; margin-bottom: 10px; font-size: 13px;
+  display: inline-flex; align-items: baseline; gap: 8px; flex: 0 0 auto;
+  border: 1px dashed var(--line); border-radius: 999px;
+  background: var(--card); padding: 6px 14px; color: var(--muted);
+  cursor: pointer; font-size: 13px; white-space: nowrap;
   transition: border-color .12s, background .12s, color .12s;
 }
+.drop .drop-t { color: var(--ink); font-weight: 600; }
+.drop:hover, .drop.over, .drop:focus-within {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--ink);
+}
+.empty .drop { margin: 12px auto 0; }
 .drop:hover, .drop.over, .drop:focus-within {
   border-color: var(--accent); background: var(--accent-soft); color: var(--ink);
 }
@@ -378,7 +386,8 @@ button, input, select { font: inherit; color: inherit; }
 
 /* --- vista semanal (rejilla tipo PDF) ----------------------------------- */
 
-.viewbar { display: flex; gap: 4px; margin-bottom: 10px; }
+.viewbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.tabs-group { display: flex; gap: 4px; }
 .viewbar button {
   border: 1px solid var(--line); background: var(--card); color: var(--muted);
   padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 14px;
@@ -511,6 +520,20 @@ button, input, select { font: inherit; color: inherit; }
   border-color: var(--bad); background: var(--bad-soft);
 }
 
+/* El botón de la columna: tres rayas, con el contador de solicitudes encima. */
+.btn-menu { position: relative; padding: 8px 10px; }
+.btn-menu .hamb, .btn-menu .hamb::before, .btn-menu .hamb::after {
+  display: block; width: 18px; height: 2px; border-radius: 2px;
+  background: currentColor;
+}
+.btn-menu .hamb { position: relative; }
+.btn-menu .hamb::before, .btn-menu .hamb::after {
+  content: ""; position: absolute; left: 0;
+}
+.btn-menu .hamb::before { top: -6px; }
+.btn-menu .hamb::after { top: 6px; }
+.btn-menu .badge { position: absolute; top: -6px; right: -6px; }
+
 /* --- cuándo / más activos / ruleta ---------------------------------------- */
 
 .card {
@@ -588,4 +611,30 @@ button.chip { cursor: pointer; font: inherit; font-size: 13px; }
     from { transform: translateY(-6px); opacity: .4; }
     to { transform: none; opacity: 1; }
   }
+}
+
+/* --- La ruleta ------------------------------------------------------------
+   Un sector por persona, girando de verdad y parando en el ganador. El
+   grupo .rueda-giro es lo que rota; el puntero de arriba no se mueve. */
+.ruleta-caja { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 6px 0 2px; }
+.rueda-marco { position: relative; width: 220px; max-width: 100%; }
+.rueda { display: block; width: 100%; height: auto; filter: drop-shadow(0 6px 14px rgb(0 0 0 / .12)); }
+.rueda-n { font-weight: 600; pointer-events: none; }
+.rueda-giro { transition: transform 3.4s cubic-bezier(.12, .72, .14, 1); will-change: transform; }
+.rueda-flecha {
+  /* La punta del triángulo justo en el borde de la rueda: señala, no tapa. */
+  position: absolute; top: -15px; left: 50%; translate: -50% 0;
+  width: 0; height: 0; border: 9px solid transparent; border-top: 15px solid var(--ink);
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / .3));
+}
+.rueda-pie { margin: 0; font-size: 12px; color: var(--muted); }
+.ruleta-caja.girando .rueda { animation: rule-temble 0.16s linear infinite; }
+@keyframes rule-temble { 0%, 100% { rotate: -1.2deg; } 50% { rotate: 1.2deg; } }
+.ruleta-caja.girando .rueda-pie { color: var(--ink); font-weight: 600; }
+
+.sorteo { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.sorteo-out { margin: 6px 0; font-size: 15px; }
+@media (prefers-reduced-motion: reduce) {
+  .rueda-giro { transition: none !important; }
+  .ruleta-caja.girando .rueda { animation: none; }
 }

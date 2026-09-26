@@ -14,7 +14,7 @@ const S = {
   slug: null,
   week: [],
   roster: [],
-  view: "semana",   // "semana" (rejilla L-V), "dia", "cuando", "activos" o "ruleta"
+  view: "semana",   // "semana" (rejilla L-V) o "dia"; lo demás vive en Ajustes
   day: todayIndex(),
   query: "",
   report: null,
@@ -27,8 +27,13 @@ const S = {
   },
   ruleta: null,   // datos de /ruleta: padrón, strikes y participaciones
   ruletaError: null,
+  ajustes: "cuenta",   // sección del sidebar de Ajustes que está abierta
   girando: null,  // id de la actividad que se está girando ahora
+  vueltas: 0,     // por dónde va la rueda mientras espera al reparto
   ultimo: null,   // último sorteo, para enseñarlo debajo de la actividad
+  editando: null, // id de la actividad abierta en el formulario de edición
+  borrador: null, // lo que se está escribiendo: vive aquí para que al repintar
+                 // no se pierdan ni el nombre ni los días ya escritos
 };
 
 const group = () => S.groups.find((g) => g.slug === S.slug) || null;
@@ -206,9 +211,6 @@ async function load() {
 function render(error) {
   clear(root).append(header(), el("main", { className: "wrap" }, ...body(error)));
   requestAnimationFrame(ajustarRejilla);
-  // Ni se pide dos veces ni se reintenta eternamente cuando ya ha fallado: si el
-  // servidor dice que no, repetirlo solo daría un bucle de recargados.
-  if (["ruleta", "activos"].includes(S.view) && S.slug && !S.ruleta && !S.ruletaError) cargarRuleta();
 }
 
 function header() {
@@ -240,10 +242,13 @@ function header() {
       S.slug ? picker : null,
       el("div", { className: "search" }, search),
       el("div", { className: "spacer" }),
+      // El botón que abre la columna. Tres líneas, como siempre se ha dibujado.
       el("button", {
-        className: "btn", type: "button",
-        onclick: () => openSettings(S.pending ? "solicitudes" : "cuenta"),
-      }, "Ajustes", S.pending ? el("span", { className: "badge", textContent: String(S.pending) }) : null)));
+        className: "btn btn-menu", type: "button", ariaLabel: "Ajustes", title: "Ajustes",
+        onclick: () => openSettings(S.pending ? "solicitudes" : S.ajustes),
+      },
+        el("span", { className: "hamb", ariaHidden: "true" }),
+        S.pending ? el("span", { className: "badge", textContent: String(S.pending) }) : null)));
 }
 
 function body(error) {
@@ -263,7 +268,6 @@ function body(error) {
   }
 
   const out = [];
-  if (isAdmin()) out.push(dropzone());
   if (S.report) out.push(reportCard(S.report));
 
   if (!S.roster.length) {
@@ -271,7 +275,8 @@ function body(error) {
       el("strong", { textContent: "Aún no hay horarios" }),
       isAdmin()
         ? "Sube los PDF: el nombre del archivo es el nombre de la persona."
-        : "Quien administra la agrupación todavía no ha subido ninguno."));
+        : "Quien administra la agrupación todavía no ha subido ninguno."),
+      isAdmin() ? dropzone() : null);
     return out;
   }
 
@@ -283,18 +288,6 @@ function body(error) {
   out.push(viewBar());
   if (S.view === "semana") {
     out.push(weekGrid());
-    return out;
-  }
-  if (S.view === "cuando") {
-    out.push(viewCuando());
-    return out;
-  }
-  if (S.view === "activos") {
-    out.push(viewActivos());
-    return out;
-  }
-  if (S.view === "ruleta") {
-    out.push(viewRuleta());
     return out;
   }
 
@@ -310,19 +303,25 @@ function body(error) {
   return out;
 }
 
+/** La rejilla, y al final el botón de subir. Lo demás está en Ajustes, en la
+ *  columna de la izquierda. */
 function viewBar() {
-  const tabs = [["semana", "Semana"], ["dia", "Por día"], ["cuando", "Cuándo"], ["activos", "Más activos"]];
-  if (isAdmin()) tabs.push(["ruleta", "Ruleta"]);
-  return el("div", { className: "viewbar", role: "tablist", ariaLabel: "Vista" },
-    ...tabs.map(([id, label]) =>
-      el("button", {
-        type: "button", role: "tab", textContent: label,
-        ariaSelected: String(S.view === id),
-        onclick: () => { S.view = id; S.ultimo = null; render(); },
-      })));
+  return el("div", { className: "viewbar" },
+    el("div", { className: "tabs-group", role: "tablist", ariaLabel: "Vista" },
+      ...[["semana", "Semana"], ["dia", "Por día"]].map(([id, label]) =>
+        el("button", {
+          type: "button", role: "tab", textContent: label,
+          ariaSelected: String(S.view === id),
+          onclick: () => { S.view = id; render(); },
+        }))),
+    el("span", { className: "spacer" }),
+    isAdmin() ? dropzone() : null);
 }
 
 // --- cuándo hay más gente libre --------------------------------------------
+// Las tres secciones siguientes (Cuándo, Más activos y Ruleta) viven dentro del
+// sidebar de Ajustes, así que se pintan en el panel y no en la página. Sus
+// acciones repintan el panel con repintarAjustes() en lugar de render().
 
 const DURACIONES = [[30, "30 min"], [45, "45 min"], [60, "1 h"], [90, "1 h 30"], [120, "2 h"], [180, "3 h"]];
 const PASOS = [[5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"]];
@@ -335,7 +334,7 @@ function viewCuando() {
 
   const marcar = (d) => {
     q.dias = q.dias.includes(d) ? q.dias.filter((x) => x !== d) : [...q.dias, d];
-    render();
+    repintarAjustes();
   };
   const num = (clave, opciones) => el("select", {
     ariaLabel: clave,
@@ -346,8 +345,8 @@ function viewCuando() {
     className: "card panel-form",
     onsubmit: async (e) => {
       e.preventDefault();
-      if (!q.dias.length) { q.error = "Elige al menos un día."; return render(); }
-      q.cargando = true; q.error = null; render();
+      if (!q.dias.length) { q.error = "Elige al menos un día."; return repintarAjustes(); }
+      q.cargando = true; q.error = null; repintarAjustes();
       try {
         q.resultados = await api.libres(S.slug, {
           dias: q.dias.join(","), desde: q.desde, hasta: q.hasta,
@@ -357,7 +356,7 @@ function viewCuando() {
         q.error = err.message; q.resultados = null;
       }
       q.cargando = false;
-      render();
+      repintarAjustes();
     },
   },
     el("div", { className: "campo" },
@@ -461,6 +460,16 @@ function viewActivos() {
 
 // --- ruleta -----------------------------------------------------------------
 
+/** Las tres secciones, llevadas al panel de Ajustes. */
+function cuandoView() { appendTodo(settingsBody(), viewCuando()); }
+function activosView() { appendTodo(settingsBody(), viewActivos()); }
+function ruletaView() { appendTodo(settingsBody(), viewRuleta()); }
+
+/** append() pondría "null" en el texto si alguna vista devuelve un hueco vacío. */
+function appendTodo(box, nodos) {
+  return box.append(...nodos.filter((n) => n != null && n !== false));
+}
+
 let ruletaPeticion = null;   // agrupación que se está pidiendo, para no duplicar
 
 async function cargarRuleta({ force = false } = {}) {
@@ -479,7 +488,10 @@ async function cargarRuleta({ force = false } = {}) {
     S.ruleta = null;
     S.ruletaError = err.message;
   }
-  render();
+  // Los datos se ven dentro del sidebar de Ajustes, así que quien hay que
+  // redibujar es el panel; la página de detrás solo si el panel está cerrado.
+  if (panel.classList.contains("on")) repintarAjustes();
+  else render();
 }
 
 function viewRuleta() {
@@ -491,47 +503,86 @@ function viewRuleta() {
   if (S.ruletaError) return [el("div", { className: "note err", textContent: S.ruletaError })];
   if (!S.ruleta) return [el("p", { className: "hint", textContent: "Cargando…" })];
 
-  return [nuevaActividad(), ...S.ruleta.actividades.map((a) => tarjetaActividad(a)), padronStrikes()];
+  const tarjetas = S.ruleta.actividades
+    .filter((a) => S.editando !== a.id)
+    .map((a) => tarjetaActividad(a));
+  const editando = S.ruleta.actividades.find((a) => a.id === S.editando);
+  return [
+    editando ? formActividad(editando) : formActividad(),
+    ...tarjetas,
+    padronStrikes(),
+  ];
 }
 
-/** Formulario de alta: una venta (todo el día, sin mirar el horario) o una
- *  actividad con día y hora, que solo sale en el padrón libre en esa franja. */
-function nuevaActividad() {
-  const c = { nombre: "", modo: "ventas", dia: todayIndex(), inicio: "18:00", fin: "20:00", cuantas: 1 };
+/** Formulario de alta y de edición, el mismo para las dos cosas.
+
+ * Una venta da igual el horario (es gente que está ahí todo el día) y puede
+ * ocupar varios días. Una actividad tiene un día exacto y una franja: solo
+ * puede salir quien esté libre entonces, que es la razón de tener los horarios
+ * en la misma aplicación. `cuántas` es cuántas manos hacen falta de una vez.
+ */
+function formActividad(act = null) {
+  // El borrador se guarda en el estado y no en esta función: cambiar el tipo de
+  // actividad repinta el formulario, y si el texto viviera aquí se borraría.
+  if (!S.borrador || S.borrador.id !== (act?.id ?? null)) {
+    S.borrador = {
+      id: act?.id ?? null,
+      nombre: act?.nombre || "",
+      modo: act?.modo || "ventas",
+      dias: [...(act?.dias || [todayIndex()])],
+      inicio: act?.modo === "horario" ? hhmm(act.inicio) : "18:00",
+      fin: act?.modo === "horario" ? hhmm(act.fin) : "20:00",
+      cuantas: act?.cuantas || 1,
+    };
+  }
+  const c = S.borrador;
   const aviso = el("div");
 
-  const conHora = () => el("div", { className: "linea wrap" },
-    el("select", {
-      ariaLabel: "Día",
-      onchange: (e) => { c.dia = Number(e.target.value); },
-    }, ...DAYS.map((d, n) => el("option", { value: String(n), textContent: d, selected: n === c.dia }))),
-    el("input", {
-      type: "time", value: c.inicio, ariaLabel: "Empieza",
-      onchange: (e) => { c.inicio = e.target.value; },
-    }),
-    el("span", { textContent: "a" }),
-    el("input", {
-      type: "time", value: c.fin, ariaLabel: "Acaba",
-      onchange: (e) => { c.fin = e.target.value; },
-    }));
+  const chipDia = (n) => el("button", {
+    type: "button", className: `chip${c.dias.includes(n) ? " on" : ""}`,
+    textContent: DAYS[n].slice(0, 3), ariaPressed: String(c.dias.includes(n)),
+    ariaLabel: DAYS[n],
+    onclick: () => {
+      if (c.modo === "horario") c.dias = [n];          // con hora fija, un solo día
+      else c.dias = c.dias.includes(n) ? c.dias.filter((x) => x !== n) : [...c.dias, n].sort();
+      repintarAjustes();
+    },
+  });
 
   const tipo = el("select", {
     ariaLabel: "Tipo de actividad",
-    onchange: (e) => { c.modo = e.target.value; render(); },
+    onchange: (e) => {
+      c.modo = e.target.value;
+      if (c.modo === "horario") c.dias = [c.dias[0] ?? todayIndex()];   // solo uno
+      repintarAjustes();
+    },
   },
     el("option", { value: "ventas", textContent: "Venta (todo el día)", selected: c.modo === "ventas" }),
-    el("option", { value: "horario", textContent: "Actividad con hora fija", selected: c.modo === "horario" }));
+    el("option", { value: "horario", textContent: "Actividad", selected: c.modo === "horario" }));
+
+  const num = (min, max) => el("input", {
+    type: "number", min: String(min), max: String(max), value: String(c.cuantas),
+    ariaLabel: "Cuántas personas",
+    oninput: (e) => { c.cuantas = Number(e.target.value); },
+  });
 
   return el("form", {
     className: "card panel-form",
     onsubmit: async (e) => {
       e.preventDefault();
+      if (!c.dias.length) {
+        clear(aviso).append(el("div", { className: "note err", textContent: "Elige al menos un día." }));
+        return;
+      }
       const envio = {
-        nombre: c.nombre.trim(), modo: c.modo, cuantas: c.cuantas,
-        dia: c.dia, inicio: c.inicio, fin: c.fin,
+        nombre: c.nombre.trim(), modo: c.modo, dias: c.dias,
+        inicio: c.inicio, fin: c.fin, cuantas: c.cuantas,
       };
       try {
-        await api.crearActividad(S.slug, envio);
+        if (act) await api.editarActividad(S.slug, act.id, envio);
+        else await api.crearActividad(S.slug, envio);
+        S.editando = null;
+        S.borrador = null;      // la siguiente empieza en blanco
         S.ultimo = null;
         await cargarRuleta({ force: true });
       } catch (err) {
@@ -539,27 +590,46 @@ function nuevaActividad() {
       }
     },
   },
-    el("h2", { textContent: "Nueva actividad" }),
+    el("h2", { textContent: act ? `Editar ${act.nombre}` : "Nueva actividad" }),
     el("div", { className: "campo" },
       el("span", { className: "rot", textContent: "Cómo es" }), tipo),
     el("div", { className: "campo" },
       el("span", { className: "rot", textContent: "Nombre" }),
       el("input", {
         type: "text", placeholder: "Venta del viernes", ariaLabel: "Nombre de la actividad", required: true,
+        value: c.nombre,
         oninput: (e) => { c.nombre = e.target.value; },
       })),
+    el("div", { className: "campo" },
+      el("span", { className: "rot", textContent: c.modo === "ventas" ? "Días" : "Día" }),
+      el("div", { className: "chips" }, ...DAYS.map((d, n) => chipDia(n)))),
     c.modo === "horario"
       ? el("div", { className: "campo" },
-        el("span", { className: "rot", textContent: "Cuándo" }), conHora())
+        el("span", { className: "rot", textContent: "De qué hora" }),
+        el("div", { className: "linea" },
+          el("input", {
+            type: "time", value: c.inicio, ariaLabel: "Empieza",
+            onchange: (e) => { c.inicio = e.target.value; },
+          }),
+          el("span", { textContent: "a" }),
+          el("input", {
+            type: "time", value: c.fin, ariaLabel: "Acaba",
+            onchange: (e) => { c.fin = e.target.value; },
+          })))
       : null,
     el("div", { className: "campo" },
-      el("span", { className: "rot", textContent: "Cuántas" }),
-      el("input", {
-        type: "number", min: "1", max: "6", value: "1", ariaLabel: "Cuántas personas",
-        oninput: (e) => { c.cuantas = Number(e.target.value); },
-      })),
+      el("span", { className: "rot", textContent: "Personas" }),
+      el("div", { className: "linea" }, num(1, S.ruleta?.cuantas_max || 6),
+        "a la vez, sin repetir")),
     aviso,
-    el("button", { className: "btn btn-primary", type: "submit", textContent: "Crear" }));
+    el("div", { className: "linea" },
+      el("button", { className: "btn btn-primary", type: "submit", textContent: act ? "Guardar" : "Crear" }),
+      act
+        ? el("button", {
+          className: "btn", type: "button", textContent: "Cancelar",
+          onclick: () => { S.editando = null; S.borrador = null; repintarAjustes(); },
+        })
+        : null));
 }
 
 function tarjetaActividad(a) {
@@ -567,11 +637,16 @@ function tarjetaActividad(a) {
     .then(() => { S.ultimo = null; return cargarRuleta({ force: true }); })
     .catch((err) => alert(err.message));
 
+  const cuando = a.dias.length
+    ? a.dias.map((d) => DAYS[d].slice(0, 3)).join(", ")
+    : "sin día";
+
   return el("section", { className: "card act" },
     el("div", { className: "act-cab" },
       el("b", { textContent: a.nombre }),
+      el("span", { className: "tag", textContent: cuando }),
       el("span", { className: "tag", textContent: a.modo === "ventas" ? "todo el día" : fmtRange(a.inicio, a.fin) }),
-      a.modo === "horario" ? el("span", { className: "tag", textContent: DAYS[a.dia] }) : null,
+      el("span", { className: "tag", textContent: `${a.cuantas} ${a.cuantas === 1 ? "persona" : "personas"}` }),
       el("span", { className: "spacer" }),
       el("button", {
         className: "btn btn-primary", type: "button",
@@ -580,15 +655,27 @@ function tarjetaActividad(a) {
         onclick: () => girar(a),
       }),
       el("button", {
+        className: "btn", type: "button", textContent: "✎", ariaLabel: `Editar ${a.nombre}`,
+        onclick: () => {
+          S.editando = a.id;
+          S.borrador = null;    // se rellena con los datos de esa actividad
+          S.ultimo = null;
+          repintarAjustes();
+        },
+      }),
+      el("button", {
         className: "btn btn-danger", type: "button", textContent: "×",
         ariaLabel: `Eliminar ${a.nombre}`,
         onclick: async () => {
           if (!confirm(`¿Eliminar «${a.nombre}» y su conteo?`)) return;
           await api.borrarActividad(S.slug, a.id);
+          if (S.editando === a.id) S.borrador = null;
+          S.editando = null;
           S.ultimo = null;
           cargarRuleta({ force: true });
         },
       })),
+    S.ultimo?.id === a.id ? null : ruletaCaja(a, S.girando === a.id),
     a.participantes.length
       ? el("div", { className: "chips" }, ...a.participantes.map((n) => el("span", { className: "chip on" },
         n,
@@ -600,41 +687,143 @@ function tarjetaActividad(a) {
     S.ultimo?.id === a.id ? resultadoSorteo(S.ultimo) : null);
 }
 
-/** Al girar sale el reparto. Con movimiento se ve la cinta de nombres correr; sin
- *  movimiento (o si el sistema lo pide así) va directo al resultado. */
+/** Gira la ruleta. El sorteo lo decide el servidor y llega ya hecho: aquí solo
+ *  se enseña, parando la rueda en quien salió. Si el sistema pide menos
+ *  movimiento, sale el resultado sin girar. */
 async function girar(a) {
   S.girando = a.id;
   S.ultimo = null;
-  render();
-  const cinta = document.querySelector(".tira");
-  let t;
-  const parar = () => { if (t) clearInterval(t); };
-  if (cinta && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    const nombres = S.ruleta.personas.map((p) => p.name);
-    let i = 0;
-    t = setInterval(() => {
-      i = (i + 1) % nombres.length;
-      cinta.textContent = nombres[i];
-    }, 70);
-  }
+  // Arranca girando ya, sin esperar al servidor: quien le dio al botón ve la
+  // rueda en marcha mientras se decide, y luego se para en el ganador.
+  S.vueltas = 5 + Math.floor(Math.random() * 3);
+  repintarAjustes();
+  let r;
   try {
-    const r = await api.girar(S.slug, a.id, { cuantas: 1 });
-    parar();
-    S.ultimo = { id: a.id, ...r };
+    // Sin mandar cuántas: se usan las que pide la actividad, que es lo escrito.
+    r = await api.girar(S.slug, a.id, {});
   } catch (err) {
-    parar();
-    alert(err.message);
+    S.girando = null;
+    S.vueltas = 0;
+    repintarAjustes();
+    return alert(err.message);
   }
   S.girando = null;
-  render();
+  S.vueltas = 0;
+  S.ultimo = { id: a.id, ...r };
+  // Al volver no solo sale el reparto: quien sale deja de estar en el bombo y su
+  // strike se queda a cero, así que hay que releerlo todo antes de girar.
+  await cargarRuleta({ force: true });
+  repintarAjustes();
+  const destino = document.querySelector(`.ruleta-caja[data-act="${a.id}"]`);
+  if (destino) await girarRueda(destino, r);
+}
+
+/** Le da varias vueltas y para con el sector de quien salió bajo el puntero. */
+function girarRueda(caja, r) {
+  const g = caja.querySelector(".rueda-giro");
+  const elegido = r.elegidos[0];
+  const sector = g && [...g.querySelectorAll("[data-nombre]")].find((n) => n.dataset.nombre === elegido?.name);
+  if (!sector) return Promise.resolve();
+  const centro = Number(sector.dataset.grados) + Number(sector.dataset.ancho) / 2;
+  const vueltas = 5 + Math.floor(Math.random() * 3);
+  const sinMovimiento = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return new Promise((listo) => {
+    g.style.transition = sinMovimiento ? "none" : "transform 3.4s cubic-bezier(.12,.72,.14,1)";
+    g.style.transform = `rotate(${360 * vueltas - centro}deg)`;
+    if (sinMovimiento) return listo();
+    g.addEventListener("transitionend", () => listo(), { once: true });
+    setTimeout(listo, 4200);   // por si el navegador no lanza el evento
+  });
+}
+
+const NS = "http://www.w3.org/2000/svg";
+const nodoSvg = (tag, attrs, texto) => {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+  if (texto) n.textContent = texto;
+  return n;
+};
+
+/** El bombo, con un sector por persona y los nombres tumbados sobre el radio.
+ *  Los sectores se construyen dentro del grupo que gira, con los grados de su
+ *  centro apuntados, que es lo que luego usa el aterrizaje. */
+function rueda(pool) {
+  const n = pool.length;
+  const R = 100, C = 110, rint = 44;
+  const svg = nodoSvg("svg", {
+    viewBox: "0 0 220 220", class: "rueda", role: "img",
+    "aria-label": `Ruleta con ${n} ${n === 1 ? "persona" : "personas"}: ${pool.map((p) => p.name).join(", ")}`,
+  });
+  if (!n) {
+    svg.append(nodoSvg("circle", { cx: C, cy: C, r: R, fill: "var(--line-soft)" }));
+    svg.append(nodoSvg("text", {
+      x: C, y: C, "text-anchor": "middle", "dominant-baseline": "middle",
+      fill: "var(--muted)", "font-size": 12,
+    }, "sin nadie"));
+    return svg;
+  }
+  const g = nodoSvg("g", { class: "rueda-giro" });
+  g.style.transformOrigin = `${C}px ${C}px`;
+  const ancho = 360 / n;
+  const rad = (x) => (x * Math.PI) / 180;
+  pool.forEach((p, i) => {
+    // El sector arranca en -90° para que el primer sector quede arriba, donde
+    // está el puntero, en lugar de a la derecha como en un reloj.
+    const desde = i * ancho - 90, hasta = desde + ancho;
+    const x0 = C + R * Math.cos(rad(desde)), y0 = C + R * Math.sin(rad(desde));
+    const x1 = C + R * Math.cos(rad(hasta)), y1 = C + R * Math.sin(rad(hasta));
+    const d = `M ${C} ${C} L ${x0.toFixed(2)} ${y0.toFixed(2)}`
+      + ` A ${R} ${R} 0 ${ancho > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z`;
+    g.append(nodoSvg("path", {
+      d, fill: i % 2 ? "var(--accent-soft)" : "var(--card)",
+      stroke: "var(--line)", "stroke-width": 1,
+      "data-nombre": p.name, "data-grados": i * ancho, "data-ancho": ancho,
+    }));
+    const medio = desde + ancho / 2;
+    const tx = C + (rint + 16) * Math.cos(rad(medio)), ty = C + (rint + 16) * Math.sin(rad(medio));
+    g.append(nodoSvg("text", {
+      x: tx.toFixed(2), y: ty.toFixed(2), class: "rueda-n",
+      "font-size": p.name.length > 11 ? 9.5 : 11.5, fill: "var(--ink)",
+      "text-anchor": medio > 90 && medio < 270 ? "end" : "start",
+      transform: `rotate(${(medio + 90).toFixed(2)} ${tx.toFixed(2)} ${ty.toFixed(2)})`,
+    }, p.name));
+  });
+  svg.append(g);
+  svg.append(nodoSvg("circle", { cx: C, cy: C, r: rint, fill: "var(--card)", stroke: "var(--line)" }));
+  svg.append(nodoSvg("circle", { cx: C, cy: C, r: 8, fill: "var(--accent)" }));
+  return svg;
+}
+
+/** La caja con la rueda y el puntero, en medio de la tarjeta. */
+function ruletaCaja(a, girando) {
+  const svg = rueda(a.pool || []);
+  if (girando && S.vueltas) {
+    // A medio camino: el ángulo es de mentira, pero se ve que está girando.
+    svg.querySelector(".rueda-giro").style.transform = `rotate(${360 * S.vueltas - 37}deg)`;
+  }
+  const caja = el("div", { className: `ruleta-caja${girando ? " girando" : ""}` },
+    el("div", { className: "rueda-marco" }, svg, el("span", { className: "rueda-flecha" })),
+    el("p", {
+      className: "rueda-pie",
+      textContent: girando
+        ? "Girando…"
+        : `${(a.pool || []).length} en el bombo${a.ocupados?.length ? ` · ${a.ocupados.length} con clase` : ""}`,
+    }));
+  caja.dataset.act = a.id;
+  return caja;
 }
 
 function resultadoSorteo(r) {
+  const act = S.ruleta.actividades.find((a) => a.id === r.id) || { id: r.id, pool: r.pool };
+  const cuantos = r.elegidos.length;
   return el("div", { className: "sorteo" },
-    el("div", { className: "tira", textContent: r.elegidos.map((e) => e.name).join("  ·  ") || "—" }),
-    r.elegidos.length
-      ? el("p", { className: "sorteo-out", textContent: `Sale ${r.elegidos.length === 1 ? "nadie más que" : ""} ${r.elegidos.map((e) => e.name).join(", ")}.` })
-      : el("p", { className: "sorteo-out", textContent: "No ha salido nadie." }),
+    ruletaCaja({ ...act, pool: r.pool.length ? r.pool : act.pool }, false),
+    el("p", { className: "sorteo-out" },
+      el("b", { textContent: r.elegidos[0].name }),
+      cuantos > 1
+        ? el("span", { textContent: ` y ${r.elegidos.slice(1).map((e) => e.name).join(", ")}` })
+        : null,
+      el("span", { textContent: cuantos > 1 ? " salen esta vez." : " sale esta vez." })),
     r.descansan?.length
       ? el("p", { className: "hint", textContent: `Descansan: ${r.descansan.join(", ")}.` })
       : null,
@@ -642,7 +831,7 @@ function resultadoSorteo(r) {
       ? el("p", { className: "hint", textContent: `Con el turno no pueden: ${r.ocupados.join(", ")}.` })
       : null,
     el("button", {
-      className: "btn", type: "button", textContent: " Girar otra vez",
+      className: "btn", type: "button", textContent: "Girar otra vez",
       onclick: () => girar(S.ruleta.actividades.find((a) => a.id === r.id)),
     }));
 }
@@ -922,13 +1111,18 @@ function searchResults() {
 
 // --- subida ---------------------------------------------------------------
 
+/** El botón de subir, al final de la barra de vistas. Sigue aceptando soltar
+ *  archivos encima, que es como se subían antes. */
 function dropzone() {
   // sr-only y no `hidden`: así el campo sigue recibiendo el foco del teclado.
   const input = el("input", {
     type: "file", accept: ".pdf,application/pdf,image/*", multiple: true, className: "sr-only",
   });
-  const zone = el("label", { className: "drop" },
-    "Suelta aquí los PDF o las imágenes, o haz clic para elegirlos. El nombre del archivo es el nombre de la persona.",
+  const zone = el("label", {
+    className: "drop",
+    title: "Suelta aquí los PDF o las imágenes. El nombre del archivo es el nombre de la persona.",
+  },
+    el("span", { className: "drop-t", textContent: "Subir PDF" }),
     input);
 
   input.addEventListener("change", () => { const f = [...input.files]; input.value = ""; upload(f); });
@@ -1113,13 +1307,15 @@ function reportCard(report) {
 
 // --- panel lateral --------------------------------------------------------
 
-function openPanel(...content) {
+function openPanel({ foco = true, ancho = null } = {}, ...content) {
   // append() convertiría un null o undefined en el texto "null"/"undefined".
-  panel.classList.remove("side-panel");   // los ajustes ensanchan el panel, la ficha no
   clear(panel).append(...content.filter((n) => n != null && n !== false));
   panel.hidden = false;
+  panel.classList.toggle("side-panel", ancho === "side");
   requestAnimationFrame(() => { panel.classList.add("on"); scrim.classList.add("on"); });
-  panel.querySelector("button, input")?.focus();
+  // Al repintar lo que ya estaba abierto no se roba el foco, que si no el
+  // navegador se lo lleva a otro lado mientras se escribe.
+  if (foco) panel.querySelector("button, input")?.focus();
 }
 
 function closePanel() {
@@ -1332,24 +1528,36 @@ function addBlockSection(p) {
 
 // --- ajustes --------------------------------------------------------------
 
-function openSettings(tab = "cuenta") {
-  const tabs = [["cuenta", "Cuenta"]];
-  if (isAdmin()) tabs.push(["horarios", "Horarios"]);
-  if (isOwner()) tabs.push(["miembros", "Miembros"]);
+const SECCIONES_AJUSTES = () => {
+  const t = [["cuando", "Cuándo"], ["activos", "Más activos"]];
+  if (isAdmin()) t.push(["ruleta", "Ruleta"]);
+  if (isAdmin()) t.push(["horarios", "Horarios"]);
+  if (isOwner()) t.push(["miembros", "Miembros"]);
   if (S.user.is_superadmin) {
-    tabs.push(["grupos", "Agrupaciones"]);
-    tabs.push(["solicitudes", S.pending ? `Solicitudes (${S.pending})` : "Solicitudes"]);
+    t.push(["grupos", "Agrupaciones"]);
+    t.push(["solicitudes", S.pending ? `Solicitudes (${S.pending})` : "Solicitudes"]);
   }
+  t.push(["cuenta", "Cuenta"]);
+  return t;
+};
+
+/** Las secciones van en una columna, como el menú de cualquier aplicación, y
+ *  abajo la cuenta con el botón de salir: es lo último que se hace, no lo
+ *  primero que se pisa por error al ir con el dedo por la parte de arriba. */
+function openSettings(tab = S.ajustes, { foco = true } = {}) {
+  const tabs = SECCIONES_AJUSTES();
   if (!tabs.some(([id]) => id === tab)) tab = "cuenta";
+  S.ajustes = tab;
+  // Ruleta y Más activos necesitan datos que aún no están: se piden al abrirlos,
+  // no solo cuando se redibuja la página de detrás.
+  const pide = ["ruleta", "activos"].includes(tab) && !S.ruleta && !S.ruletaError;
 
   const vistas = {
+    cuando: cuandoView, activos: activosView, ruleta: ruletaView,
     cuenta: accountView, horarios: schedulesView, miembros: membersView,
     grupos: groupsView, solicitudes: requestsView,
   };
 
-  // Las secciones van en una columna, como el menú de cualquier aplicación, y
-  // abajo la cuenta con el botón de salir: es lo último que se hace, no lo
-  // primero que se pisa por error al ir con el dedo por la parte de arriba.
   const nav = el("div", { className: "side-nav", role: "tablist", ariaLabel: "Ajustes" },
     ...tabs.map(([id, label]) => el("button", {
       type: "button", role: "tab", textContent: label, ariaSelected: String(id === tab),
@@ -1362,12 +1570,18 @@ function openSettings(tab = "cuenta") {
         onclick: async () => { closePanel(); await api.logout(); showLogin(); },
       })));
 
-  openPanel(...panelHead("Ajustes"),
+  openPanel({ foco, ancho: "side" }, ...panelHead("Ajustes"),
     el("div", { className: "side" },
       nav,
       el("div", { className: "side-body", id: "settings-body" })));
-  panel.classList.add("side-panel");
   vistas[tab]();
+  if (pide) cargarRuleta();
+}
+
+/** Vuelve a pintar la sección abierta sin cerrarla: los datos llegan después y
+ *  hay que enseñarlos donde están, no en la página de detrás. */
+function repintarAjustes() {
+  if (panel.classList.contains("on") && S.slug) openSettings(S.ajustes, { foco: false });
 }
 
 function settingsBody() {

@@ -94,6 +94,8 @@ export const api = {
   ruleta: (slug) => request(`/g/${encodeURIComponent(slug)}/ruleta`),
   crearActividad: (slug, data) =>
     request(`/g/${encodeURIComponent(slug)}/actividades`, { method: "POST", json: data }),
+  editarActividad: (slug, id, data) =>
+    request(`/g/${encodeURIComponent(slug)}/actividad/${id}`, { method: "PUT", json: data }),
   borrarActividad: (slug, id) =>
     request(`/g/${encodeURIComponent(slug)}/actividad/${id}`, { method: "DELETE" }),
   girar: (slug, id, data) =>

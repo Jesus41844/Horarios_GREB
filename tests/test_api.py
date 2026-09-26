@@ -1058,3 +1058,97 @@ def test_mas_activos_cuenta_ventas_y_actividades_por_separado(client):
         ("Luis Soto", 1, 1, 0),
         ("Juan Pérez", 0, 0, 0),       # sin participaciones, pero en el padrón
     ]
+
+
+def test_una_venta_puede_ocupar_varios_dias(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    alta(client, "greb", "Juan Pérez", 1, "07:00", "12:00")
+
+    venta = client.post("/api/g/greb/actividades", json={
+        "nombre": "Feria del fin de semana", "modo": "ventas",
+        "dias": [5, 6, 2], "cuantas": 2}).json()
+    assert venta["dias"] == "2,5,6"
+    assert [a["dias"] for a in client.get("/api/g/greb/ruleta").json()["actividades"]] == [[2, 5, 6]]
+
+    # Da igual el horario: los dos están en el padrón, aunque tengan clase.
+    r = client.post(f"/api/g/greb/actividad/{venta['id']}/girar", json={}).json()
+    assert len(r["elegidos"]) == 2          # se piden dos y salen dos de golpe
+    assert r["ocupados"] == []
+
+
+def test_modificar_una_actividad_no_toca_el_reparto(client):
+    login(client, "greb@x.com")
+    for n in ("Ana Gómez", "Juan Pérez", "Luis Soto"):
+        alta(client, "greb", n, 0, "07:00", "12:00")
+
+    act = client.post("/api/g/greb/actividades", json={
+        "nombre": "Venta del lunes", "modo": "ventas", "dias": [0], "cuantas": 1}).json()
+    salio = client.post(f"/api/g/greb/actividad/{act['id']}/girar",
+                        json={}).json()["elegidos"][0]["name"]
+
+    # Se corrige la ficha: otros días, dos personas y otro nombre.
+    r = client.put(f"/api/g/greb/actividad/{act['id']}", json={
+        "nombre": "Venta del martes", "modo": "ventas", "dias": [1, 2], "cuantas": 2})
+    assert r.status_code == 200
+    guardada = client.get("/api/g/greb/ruleta").json()["actividades"][0]
+    assert (guardada["nombre"], guardada["dias"], guardada["cuantas"]) == ("Venta del martes", [1, 2], 2)
+    assert guardada["participantes"] == [salio]      # el reparto sigue ahí
+
+    # Y de una actividad con hora fija: a un solo día y con horas que cuadren.
+    r = client.put(f"/api/g/greb/actividad/{act['id']}", json={
+        "nombre": "Charla", "modo": "horario", "dias": [3], "inicio": "18:00", "fin": "20:00"})
+    assert r.status_code == 200
+    act2 = client.get("/api/g/greb/ruleta").json()["actividades"][0]
+    assert (act2["modo"], act2["dias"], act2["inicio"], act2["fin"]) == ("horario", [3], 1080, 1200)
+
+    # Lo que no se puede: dos días con hora fija, ni editar lo que no existe.
+    for malo in ({"nombre": "X", "modo": "horario", "dias": [1, 2]},
+                 {"nombre": "X", "modo": "horario", "dias": [1], "inicio": "10:00", "fin": "09:00"},
+                 {"nombre": "  ", "modo": "ventas", "dias": [1]},
+                 {"nombre": "X", "modo": "ventas", "dias": [8]},
+                 {"nombre": "X", "modo": "ventas", "dias": [1], "cuantas": 9}):
+        assert client.put(f"/api/g/greb/actividad/{act['id']}", json=malo).status_code == 400, malo
+    assert client.put("/api/g/greb/actividad/999", json={
+        "nombre": "X", "modo": "ventas", "dias": [1]}).status_code == 404
+
+
+def test_la_ruqueta_muestra_el_bombo_que_se_va_a_sortear(client):
+    login(client, "greb@x.com")
+    for i, n in enumerate(("Ana Gómez", "Juan Pérez", "Luis Soto")):
+        alta(client, "greb", n, i, "07:00", "12:00")
+
+    # Ana tiene clase ese día a la hora de la charla, así que no sale en el bombo.
+    alta(client, "greb", "Ana Gómez", 1, "18:00", "20:00", kind="trabajo")
+    act = client.post("/api/g/greb/actividades", json={
+        "nombre": "Charla", "modo": "horario", "dias": [1],
+        "inicio": "18:00", "fin": "20:00", "cuantas": 2}).json()
+
+    # La rueda se pinta antes de girar, y solo ofrece a quien está libre en la franja.
+    previa = client.get("/api/g/greb/ruleta").json()["actividades"][0]
+    assert [p["name"] for p in previa["pool"]] == ["Juan Pérez", "Luis Soto"]
+    assert previa["ocupados"] == ["Ana Gómez"]
+
+    # Y al girar sale el mismo bombo, sin surprises.
+    salida = client.post(f"/api/g/greb/actividad/{act['id']}/girar", json={}).json()
+    assert [p["name"] for p in salida["pool"]] == [p["name"] for p in previa["pool"]]
+    assert len(salida["elegidos"]) == 2          # las dos que pedía la actividad
+    assert salida["ocupados"] == ["Ana Gómez"]
+
+
+def test_una_venta_puede_no_tener_hora_y_el_cliente_antiguo_sigue_valiendo(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+
+    # Cliente antiguo: solo `dia`, sin `dias` ni horas.
+    viejo = client.post("/api/g/greb/actividades", json={
+        "nombre": "Venta antigua", "modo": "ventas", "dia": 3}).json()
+    act = client.get("/api/g/greb/ruleta").json()["actividades"][0]
+    assert (act["nombre"], act["dias"], act["inicio"], act["fin"]) == ("Venta antigua", [3], 0, 0)
+
+    # Y el día que no existe se rechaza, no se cambia por el lunes.
+    assert client.post("/api/g/greb/actividades", json={
+        "nombre": "X", "modo": "ventas", "dia": 9}).status_code == 400
+    assert client.post("/api/g/greb/actividades", json={
+        "nombre": "X", "modo": "ventas", "dias": [1, 1, 2]}).json()["dias"] == "1,2"
+    assert viejo["modo"] == "ventas"

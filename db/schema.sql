@@ -87,6 +87,7 @@ create table if not exists horarios.actividades (
   nombre text not null,
   modo text not null check (modo in ('ventas', 'horario')),
   dia smallint not null default 0,        -- 0 = lunes ... 6 = domingo (modo 'horario')
+  dias text not null default '',          -- '0,2,4': varios días (modo 'ventas')
   inicio integer not null default 0,      -- minutos desde medianoche
   fin integer not null default 0,
   cuantas integer not null default 1,     -- cuántas personas hacen falta

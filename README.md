@@ -33,7 +33,11 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Ficha por persona**, con su semana completa, materia, aula y marcas de laboratorio o grupo.
 - **Búsqueda por nombre**, insensible a tildes y mayúsculas.
 - Los bloques consecutivos de una misma persona se unen cuando la pausa es de 10 minutos o menos.
-- **Ajustes en columna**: las secciones a la izquierda y, al pie, la cuenta con el botón de salir.
+- **Ajustes en columna**: un botón con el símbolo de menú abre el panel; las secciones quedan a la
+  izquierda (Cuándo, Más activos, Ruleta, Horarios, Miembros, Agrupaciones, Solicitudes y Cuenta) y al
+  pie la cuenta con el botón de salir. Fuera de Ajustes solo quedan la rejilla semanal y la del día.
+- **Subir PDF** como botón compacto al final de la barra de vistas, junto a *Semana* y *Por día*.
+  Sigue aceptando soltar los archivos encima.
 
 **Cuándo hay más gente libre**
 
@@ -66,16 +70,25 @@ duración pedida y devuelve los tramos con más gente libre a la vez, de mejor a
 Para repartir turnos y ponencias sin que siempre salga la misma cara. Cada actividad guarda su propio
 conteo, y son dos clases de actividad:
 
-| Modo | Qué mira al sortear |
-|---|---|
-| **Venta** | El padrón entero, sin mirar el horario: es gente que está ahí todo el día |
-| **Hora fija** | Solo quien esté libre ese día en esa franja, como en el resto de la aplicación |
+| Modo | Días | Qué mira al sortear |
+|---|---|---|
+| **Venta** | Los que se elijan, varios si hace falta | El padrón entero, sin mirar el horario: es gente que está ahí todo el día |
+| **Actividad** | Uno solo, exacto | Solo quien esté libre ese día en esa franja, como en el resto de la aplicación |
 
+- **Ficha completa**: nombre, días exactos, hora si la tiene y **cuántas personas** salen de una vez.
+  Una venta puede ocupar varios días; una actividad con hora fija no, porque el horario no alcanza
+  para decir quién está libre en dos días a la vez.
+- **Editar y eliminar**: la ✎ corrige la ficha sin tocar el reparto ya hecho; la ✕ borra la actividad
+  y su conteo.
+- **Rueda de verdad**: un sector por persona del bombo, que se pone a girar al darle al botón y se
+  para con el ganador bajo el puntero. El bombo que se ve es el mismo que se sortea, y con menos
+  movimiento (si el sistema lo pide) sale el resultado sin girar.
 - **Strikes**: botones rápidos de `+1` y `−1` por persona, con un motivo opcional. El peso en la
   sorteo es `1 + 1,5 × strikes`, así que quien más tiene, más urge que salga.
 - **Descanso**: quien salió en la actividad anterior del mismo modo no entra en la siguiente. Se puede
   desactivar por sorteo (`excluir_activos: false`) cuando de verdad haga falta.
-- Sorteo **sin reemplazo**, de 1 a 6 personas, con el resultado siempre en el servidor.
+- Sorteo **sin reemplazo**, de 1 a 6 personas de una vez, con el resultado siempre en el servidor.
+  Si se piden varias, salen todas juntas en el mismo sorteo.
 - **Corrección manual**: quien no llegó, o a quien se le olvidó apuntar, se quita con un clic, y el
   conteo se ajusta solo.
 - **Más activos**: clasificación de quién más ha salido, con el reparto entre ventas y actividades con
@@ -243,7 +256,7 @@ Todo vive en el esquema `horarios`.
 | `requests` | Solicitudes de acceso pendientes de aprobación |
 | `people` | Personas cuyo horario se gestiona, por agrupación |
 | `blocks` | Bloques de horario; `kind` distingue `clase` de `trabajo` |
-| `actividades` | Actividades de la ruleta: nombre, modo (`ventas` / `horario`), día y hora, cuántas salen |
+| `actividades` | Actividades de la ruleta: nombre, modo (`ventas` / `horario`), días exactos, hora y cuántas salen |
 | `participaciones` | Quién salió en cada actividad; enlaza con `person_key`, no con el nombre |
 | `strikes` | Strikes por persona y agrupación, con su motivo y fecha |
 | `applied_migrations` | Correcciones de datos ya aplicadas |
@@ -272,9 +285,9 @@ Todas las rutas cuelgan de `/api`. Salvo las marcadas como públicas, exigen ses
 | `GET /g/{slug}/members` · `PUT` · `DELETE …/{user_id}` | Cuenta principal | Gestión de personas |
 | `GET /g/{slug}/schedule` · `/people` · `/person` | Miembro | Consulta |
 | `GET /g/{slug}/libre` | Miembro | Tramos con más gente libre |
-| `GET /g/{slug}/ruleta` | Miembro | Padrón con strikes y participaciones, y actividades |
+| `GET /g/{slug}/ruleta` | Miembro | Padrón con strikes y participaciones, actividades y el bombo de cada una |
 | `PUT /g/{slug}/person` | Administrador | Corregir el nombre del padrón |
-| `POST /g/{slug}/actividades` · `DELETE /g/{slug}/actividad/{id}` | Administrador | Alta y borrado de actividades |
+| `POST /g/{slug}/actividades` · `PUT` · `DELETE /g/{slug}/actividad/{id}` | Administrador | Alta, edición y borrado de actividades |
 | `POST /g/{slug}/actividad/{id}/girar` | Administrador | Sortear, en el servidor |
 | `POST /g/{slug}/actividad/{id}/participacion` | Administrador | Corregir el reparto a mano |
 | `PUT /g/{slug}/strike` | Administrador | Sumar o quitar una strike |

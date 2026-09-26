@@ -55,3 +55,9 @@ create table if not exists horarios.strikes (
 alter table horarios.actividades enable row level security;
 alter table horarios.participaciones enable row level security;
 alter table horarios.strikes enable row level security;
+
+-- Ruleta: los días exactos de la actividad, para cuando no es solo uno. Las
+-- ventas suelen ser de varios días y en las ventas da igual el horario, así que
+-- los días son de quién mostrarlo y no de a quién ofrecerlo.
+alter table horarios.actividades add column if not exists dias text not null default '';
+update horarios.actividades set dias = dia::text where dias = '' and modo = 'horario';

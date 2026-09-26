@@ -404,28 +404,45 @@ def renombrar_persona(c: Conn, group_id: int, nombre: str, nuevo: str) -> bool:
 # --- ruleta de actividades --------------------------------------------------
 
 def crear_actividad(c: Conn, group_id: int, nombre: str, modo: str, dia: int,
-                    inicio: int, fin: int, cuantas: int) -> int:
+                    dias: str, inicio: int, fin: int, cuantas: int) -> int:
     return c.query(
         "INSERT INTO horarios.actividades "
-        "(group_id, nombre, modo, dia, inicio, fin, cuantas, creada) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
-        (group_id, nombre, modo, dia, inicio, fin, cuantas, now()),
+        "(group_id, nombre, modo, dia, dias, inicio, fin, cuantas, creada) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        (group_id, nombre, modo, dia, dias, inicio, fin, cuantas, now()),
     )[0]["id"]
+
+
+def editar_actividad(c: Conn, group_id: int, actividad_id: int, nombre: str, modo: str,
+                     dia: int, dias: str, inicio: int, fin: int, cuantas: int) -> bool:
+    """Corrige los datos de la actividad. El reparto ya hecho se conserva: solo
+    se corrige la ficha, que es lo que se ha escrito mal."""
+    cambia = c.query(
+        "UPDATE horarios.actividades SET nombre = ?, modo = ?, dia = ?, dias = ?, "
+        "inicio = ?, fin = ?, cuantas = ? WHERE id = ? AND group_id = ? "
+        "RETURNING id",
+        (nombre, modo, dia, dias, inicio, fin, cuantas, actividad_id, group_id),
+    )
+    return bool(cambia)
 
 
 def actividad(c: Conn, group_id: int, actividad_id: int) -> dict | None:
     rows = c.query(
-        "SELECT id, nombre, modo, dia, inicio, fin, cuantas, creada, cerrada "
+        "SELECT id, nombre, modo, dia, dias, inicio, fin, cuantas, creada, cerrada "
         "FROM horarios.actividades WHERE group_id = ? AND id = ?",
         (group_id, actividad_id),
     )
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    act = rows[0]
+    act["dias"] = dias_de(act)
+    return act
 
 
 def actividades_de(c: Conn, group_id: int) -> list[dict]:
     """Las actividades, de la más reciente a la más vieja, con quién salió en cada una."""
     acts = c.query(
-        "SELECT id, nombre, modo, dia, inicio, fin, cuantas, creada, cerrada "
+        "SELECT id, nombre, modo, dia, dias, inicio, fin, cuantas, creada, cerrada "
         "FROM horarios.actividades WHERE group_id = ? ORDER BY creada DESC, id DESC",
         (group_id,),
     )
@@ -441,7 +458,17 @@ def actividades_de(c: Conn, group_id: int) -> list[dict]:
         por_id.setdefault(r["actividad_id"], []).append(r["person_key"])
     for a in acts:
         a["participantes"] = sorted(por_id.get(a["id"], []))
+        a["dias"] = dias_de(a)
     return acts
+
+
+def dias_de(act: dict) -> list[int]:
+    """Los días de la actividad como lista, estén guardados como lista o como uno solo."""
+    try:
+        dias = sorted({int(x) for x in (act.get("dias") or "").split(",") if x.strip() != ""})
+    except ValueError:
+        dias = []
+    return [d for d in dias if 0 <= d <= 6] or [act["dia"]]
 
 
 def borrar_actividad(c: Conn, group_id: int, actividad_id: int) -> bool:

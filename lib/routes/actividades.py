@@ -26,7 +26,8 @@ CUANTAS_MAX = 6
 class ActividadIn(BaseModel):
     nombre: str
     modo: Literal["ventas", "horario"] = "horario"
-    dia: int = 0                 # solo en modo 'horario'
+    dia: int = 0                 # día suelto, por si viene de un cliente antiguo
+    dias: list[int] | None = None   # los días exactos; en 'horario', uno solo
     inicio: str = "18:00"
     fin: str = "20:00"
     cuantas: int = 1
@@ -51,6 +52,65 @@ class ParticipacionIn(BaseModel):
 def _nombres(c: Conn, group_id: int) -> dict[str, str]:
     """clave -> nombre, tal y como están guardados."""
     return {norm(p["name"]): p["name"] for p in repo.list_people(c, group_id)}
+
+
+def _datos(body: ActividadIn) -> tuple[str, int, str, int, int, int]:
+    """Lo que se guarda, ya limpio y comprobado: nombre, día, días, horas y cuántas.
+
+    Una actividad con hora fija es de un solo día (si no, el horario no alcanza
+    para decir quién está libre). Una venta da igual el horario, así que puede
+    ocupar los días que haga falta: es lo que se reparte.
+    """
+    nombre = body.nombre.strip()
+    if not nombre:
+        raise HTTPException(400, "La actividad necesita un nombre.")
+    pedidos = body.dias if body.dias is not None else [body.dia]
+    if any(d not in range(7) for d in pedidos):
+        raise HTTPException(400, "Día no válido.")   # no se descarta en silencio
+    dias = sorted(set(pedidos))
+    if not dias:
+        raise HTTPException(400, "Elige al menos un día.")
+    if body.modo == "horario" and len(dias) > 1:
+        raise HTTPException(400, "Una actividad con hora fija es de un solo día.")
+    inicio, fin = (0, 0)
+    if body.modo == "horario":
+        inicio, fin = minutos_de(body.inicio), minutos_de(body.fin)
+        if inicio >= fin:
+            raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
+    if not 1 <= body.cuantas <= CUANTAS_MAX:
+        raise HTTPException(400, f"Hacen falta entre 1 y {CUANTAS_MAX} personas.")
+    return nombre, dias[0], ",".join(str(d) for d in dias), inicio, fin, body.cuantas
+
+
+def _bombo(c: Conn, group_id: int, act: dict, nombres: dict[str, str],
+           excluir_activos: bool = True) -> dict:
+    """Quién puede salir en esta actividad ahora mismo, y por qué se quedan los
+    demás. Lo usan tanto el sorteo como la vista previa de la ruleta, para que lo
+    que se ve sea de verdad el bombo y no una lista inventada."""
+    ya_salieron = set(repo.participantes(c, act["id"]))
+    anterior = repo.participantes_de_la_anterior(c, group_id, act["modo"], act["id"])
+    descansan = set(anterior) if excluir_activos else set()
+    if act["modo"] == "horario":
+        # Con hora fija solo sale quien esté libre; las ventas miran al padrón entero.
+        libres = set(ruleta.disponibles(
+            repo.all_blocks(c, group_id), list(nombres.values()),
+            act["dia"], act["inicio"], act["fin"],
+        ))
+    else:
+        libres = set(nombres.values())
+    strike = {s["person_key"]: s["veces"] for s in repo.strikes_de(c, group_id)}
+    candidatos = [
+        {"key": key, "name": nombre, "strikes": strike.get(key, 0)}
+        for key, nombre in nombres.items()
+        if key not in ya_salieron and key not in descansan and nombre in libres
+    ]
+    return {
+        "candidatos": candidatos,
+        "ya_salieron": ya_salieron,
+        "descansan": descansan,
+        "libres": libres,
+        "strike": strike,
+    }
 
 
 def _clave_de(nombres: dict[str, str], nombre: str) -> str:
@@ -91,29 +151,37 @@ def ver_ruleta(access: Access = Depends(group_access), c: Conn = Depends(get_con
     actividades = repo.actividades_de(c, access.group["id"])
     for a in actividades:
         a["participantes"] = [nombres.get(k, k) for k in a["participantes"]]
+        bombo = _bombo(c, access.group["id"], a, nombres)
+        a["pool"] = [{"name": x["name"], "strikes": x["strikes"],
+                      "peso": ruleta.peso(x["strikes"])} for x in bombo["candidatos"]]
+        a["ocupados"] = sorted(n for n in nombres.values() if n not in bombo["libres"])
+        a["descansan"] = [nombres[k] for k in sorted(bombo["descansan"]) if k in nombres]
     return {"personas": personas, "actividades": actividades, "cuantas_max": CUANTAS_MAX}
 
 
 @router.post("/actividades")
 def crear_actividad(body: ActividadIn, access: Access = Depends(group_admin),
                     c: Conn = Depends(get_conn)):
-    nombre = body.nombre.strip()
-    if not nombre:
-        raise HTTPException(400, "La actividad necesita un nombre.")
-    inicio, fin = (0, 0)
-    if body.modo == "horario":
-        if not 0 <= body.dia <= 6:
-            raise HTTPException(400, "Día no válido.")
-        inicio, fin = minutos_de(body.inicio), minutos_de(body.fin)
-        if inicio >= fin:
-            raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
-    if not 1 <= body.cuantas <= CUANTAS_MAX:
-        raise HTTPException(400, f"Hacen falta entre 1 y {CUANTAS_MAX} personas.")
+    nombre, dia, dias, inicio, fin, cuantas = _datos(body)
     nuevo_id = repo.crear_actividad(
-        c, access.group["id"], nombre, body.modo, body.dia, inicio, fin, body.cuantas
+        c, access.group["id"], nombre, body.modo, dia, dias, inicio, fin, cuantas
     )
     c.commit()
-    return {"id": nuevo_id, "nombre": nombre, "modo": body.modo}
+    return {"id": nuevo_id, "nombre": nombre, "modo": body.modo, "dias": dias, "cuantas": cuantas}
+
+
+@router.put("/actividad/{actividad_id}")
+def editar_actividad(actividad_id: int, body: ActividadIn, access: Access = Depends(group_admin),
+                     c: Conn = Depends(get_conn)):
+    """Corrige la ficha de la actividad: el nombre, los días, la hora y cuántas
+    manos hacen falta. El reparto ya hecho no se toca, que eso ya ocurrió."""
+    nombre, dia, dias, inicio, fin, cuantas = _datos(body)
+    if not repo.editar_actividad(
+        c, access.group["id"], actividad_id, nombre, body.modo, dia, dias, inicio, fin, cuantas
+    ):
+        raise HTTPException(404, "Esa actividad no existe.")
+    c.commit()
+    return {"id": actividad_id, "nombre": nombre, "modo": body.modo, "dias": dias, "cuantas": cuantas}
 
 
 @router.delete("/actividad/{actividad_id}")
@@ -146,28 +214,11 @@ def girar(actividad_id: int, body: GirarIn, access: Access = Depends(group_admin
     if not 1 <= cuantas <= CUANTAS_MAX:
         raise HTTPException(400, f"Se eligen entre 1 y {CUANTAS_MAX} personas.")
 
-    ya_salieron = set(repo.participantes(c, actividad_id))
     # Los activos: quien salió en la actividad anterior del mismo modo descansa
     # esta, salvo que quien gira lo decida otra vez.
-    descansan = set(repo.participantes_de_la_anterior(
-        c, access.group["id"], act["modo"], actividad_id
-    )) if body.excluir_activos else set()
-
-    if act["modo"] == "horario":
-        # Con hora fija solo sale quien esté libre; las ventas miran al padrón entero.
-        libres = set(ruleta.disponibles(
-            repo.all_blocks(c, access.group["id"]), list(nombres.values()),
-            act["dia"], act["inicio"], act["fin"],
-        ))
-    else:
-        libres = set(nombres.values())
-
-    strike = {s["person_key"]: s["veces"] for s in repo.strikes_de(c, access.group["id"])}
-    candidatos = [
-        {"key": key, "name": nombre, "strikes": strike.get(key, 0)}
-        for key, nombre in nombres.items()
-        if key not in ya_salieron and key not in descansan and nombre in libres
-    ]
+    bombo = _bombo(c, access.group["id"], act, nombres, body.excluir_activos)
+    ya_salieron, descansan, libres = bombo["ya_salieron"], bombo["descansan"], bombo["libres"]
+    candidatos = bombo["candidatos"]
     if not candidatos:
         raise HTTPException(400, "No queda nadie disponible para esta actividad.")
 

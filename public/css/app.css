@@ -648,16 +648,28 @@ body.con-sorteo { overflow: hidden; }
 @keyframes sale-rueda { to { opacity: 0; transform: scale(.86); } }
 .rueda-marco { position: relative; width: min(58vmin, 320px); max-width: 100%; }
 .rueda { display: block; width: 100%; height: auto; filter: drop-shadow(0 8px 18px rgb(0 0 0 / .16)); }
-.rueda-n { font-weight: 600; fill: var(--ink); pointer-events: none; }
+/* El sector que está bajo el puntero: se ve de un vistazo por dónde va. */
+.rueda-giro path { transition: fill .12s linear; }
+.rueda-giro path.bajo { fill: var(--hit); }
 .rueda-giro { will-change: transform; }
 .rueda-hub {
   /* El nombre de quien está debajo del puntero, en el hueco del centro. */
   position: absolute; left: 50%; top: 50%; translate: -50% -50%;
-  width: 34%; display: grid; place-items: center; text-align: center;
-  padding: 4px; border-radius: 50%; overflow: hidden;
-  font: 700 clamp(10px, 2.6vmin, 13px)/1.05 var(--body);
-  letter-spacing: -.01em; pointer-events: none;
+  width: 38%; display: grid; place-items: center; text-align: center;
+  padding: 4px; border-radius: 50%; overflow: hidden; pointer-events: none;
 }
+.rueda-hub-n {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; letter-spacing: -.02em; color: var(--ink);
+  font: 700 clamp(12px, 3.4vmin, 18px)/1.05 var(--display);
+}
+/* Los nombres del bombo, todos iguales y derechos: es donde se leen. */
+.rueda-bombo {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;
+  max-height: 20vh; overflow-y: auto; padding: 2px 4px;
+}
+.chip.bomba { font-size: 12px; padding: 2px 8px; }
+.chip.bomba.bajo { background: var(--hit); border-color: var(--free); font-weight: 600; }
 .rueda-flecha {
   /* La punta del triángulo justo en el borde de la rueda: señala, no tapa. */
   position: absolute; top: -15px; left: 50%; translate: -50% 0;

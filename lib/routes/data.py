@@ -238,18 +238,20 @@ def rename_person(body: RenameIn, access: Access = Depends(group_admin), c: Conn
 @router.get("/libre")
 def buscar_libres(
     dias: str = "0,1,2,3,4",     # 0 = lunes ... 6 = domingo
-    desde: str = "07:00",        # franja del día que se mira
-    hasta: str = "22:00",
+    desde: str = "07:00",        # hasta dónde se barre el día (la app no pregunta)
+    hasta: str = "23:00",
     duracion: int = 60,          # cuánto tiene que durar el hueco, en minutos
     paso: int = 15,              # cada cuánto se prueba a empezar el hueco
     access: Access = Depends(group_access), c: Conn = Depends(get_conn),
 ):
     """Los tramos en los que está libre más gente, ordenados de mejor a peor.
 
-    Es la pregunta al revés de la rejilla: no quién está ocupado, sino cuándo se
-    puede convocar a la gente. La franja del día, cuánto tiene que durar el hueco
-    y cada cuánto se prueban los huecos los decide quien pregunta, así que sirve
-    para una reunión de media hora como para un stand de toda la tarde.
+    Es la pregunta al revés de la rejilla: no quién está ocupado, sino a quién se
+    puede convocar. La franja se barre entera sin que nadie la elija (los
+    parámetros se quedan por si acaso) y lo único que se pregunta es cuánto tiene
+    que durar el hueco y cada cuánto se prueban, así que sirve para una reunión
+    de media hora como para un stand de toda la tarde. Cada tramo vuelve con
+    `disponibles`, los nombres de quien puede, y `ocupados`, los que no.
     """
     try:
         elegidos = sorted({int(x) for x in dias.split(",") if x.strip() != ""})

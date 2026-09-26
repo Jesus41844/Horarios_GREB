@@ -21,8 +21,8 @@ const S = {
   flash: null,    // aviso que debe sobrevivir a un redibujado del panel
   pending: 0,     // solicitudes por aprobar (solo superadmin)
   waiting: null,  // agrupaciones que esta cuenta pidió y aún no le aprueban
-  cuando: {       // lo que se ha pedido en la vista "Cuándo"
-    dias: [0, 1, 2, 3, 4], desde: "07:00", hasta: "22:00",
+  libres: {       // lo que se ha pedido en la vista "Libres"
+    dias: [0, 1, 2, 3, 4],
     duracion: 60, paso: 15, resultados: null, cargando: false, error: null,
   },
   ruleta: null,   // datos de /ruleta: padrón, strikes y participaciones
@@ -317,18 +317,20 @@ function viewBar() {
     isAdmin() ? dropzone() : null);
 }
 
-// --- cuándo hay más gente libre --------------------------------------------
-// Las tres secciones siguientes (Cuándo, Más activos y Ruleta) viven dentro del
+// --- quién está libre -------------------------------------------------------
+// Las tres secciones siguientes (Libres, Más activos y Ruleta) viven dentro del
 // sidebar de Ajustes, así que se pintan en el panel y no en la página. Sus
 // acciones repintan el panel con repintarAjustes() en lugar de render().
 
 const DURACIONES = [[30, "30 min"], [45, "45 min"], [60, "1 h"], [90, "1 h 30"], [120, "2 h"], [180, "3 h"]];
 const PASOS = [[5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"]];
 
-/** "Cuándo": la pregunta al revés de la rejilla. Busca los huecos donde más
- *  gente de la agrupación está libre a la vez, y dice quién se queda fuera. */
-function viewCuando() {
-  const q = S.cuando;
+/** "Libres": la pregunta al revés de la rejilla. Busca los huecos donde más
+ *  gente está libre y dice **quién puede venir** en cada uno. No hay franjas que
+ *  elegir: se mira el día entero y solo se decide cuánto tiene que durar el
+ *  hueco, que es lo único que cambia la pregunta. */
+function viewLibres() {
+  const q = S.libres;
   const out = [];
 
   const marcar = (d) => {
@@ -347,9 +349,9 @@ function viewCuando() {
       if (!q.dias.length) { q.error = "Elige al menos un día."; return repintarAjustes(); }
       q.cargando = true; q.error = null; repintarAjustes();
       try {
+        // Sin franja: el servidor barre el día entero y ordena por gente libre.
         q.resultados = await api.libres(S.slug, {
-          dias: q.dias.join(","), desde: q.desde, hasta: q.hasta,
-          duracion: q.duracion, paso: q.paso,
+          dias: q.dias.join(","), duracion: q.duracion, paso: q.paso,
         });
       } catch (err) {
         q.error = err.message; q.resultados = null;
@@ -366,23 +368,11 @@ function viewCuando() {
         ariaLabel: d, onclick: () => marcar(n),
       })))),
     el("div", { className: "campo" },
-      el("span", { className: "rot", textContent: "Franja del día" }),
-      el("div", { className: "linea" },
-        el("input", {
-          type: "time", value: q.desde, ariaLabel: "Desde",
-          onchange: (e) => { q.desde = e.target.value; },
-        }),
-        el("span", { textContent: "a" }),
-        el("input", {
-          type: "time", value: q.hasta, ariaLabel: "Hasta",
-          onchange: (e) => { q.hasta = e.target.value; },
-        }))),
-    el("div", { className: "campo" },
       el("span", { className: "rot", textContent: "Hueco de" }),
       el("div", { className: "linea" }, num("duracion", DURACIONES), "libres cada", num("paso", PASOS))),
     el("button", {
       className: "btn btn-primary", type: "submit",
-      textContent: q.cargando ? "Buscando…" : "Buscar huecos",
+      textContent: q.cargando ? "Buscando…" : "Buscar quién está libre",
     })));
 
   if (q.error) out.push(el("div", { className: "note err", textContent: q.error }));
@@ -390,13 +380,13 @@ function viewCuando() {
 
   if (q.resultados === null) {
     out.push(el("p", { className: "hint", textContent:
-      "Elige los días, la franja y cuánto tiene que durar el hueco. Salen primero los tramos con más gente libre." }));
+      "Elige los días y cuánto tiene que durar el hueco. Salen primero los tramos con más gente libre." }));
     return out;
   }
   if (!q.resultados.length) {
     out.push(el("div", { className: "empty" },
       el("strong", { textContent: "No hay ningún hueco con esa duración" }),
-      `En la franja pedida nadie se libra ${q.duracion} minutos seguidos. Prueba con menos minutos o con más días.`));
+      `En los días pedidos nadie se libra ${q.duracion} minutos seguidos. Prueba con menos minutos o con más días.`));
     return out;
   }
 
@@ -419,8 +409,6 @@ function viewCuando() {
       : null)));
   return out;
 }
-
-// --- más activos ------------------------------------------------------------
 
 /** Quién más ha salido, contando ventas y actividades con hora por separado. */
 function viewActivos() {
@@ -465,7 +453,7 @@ function viewActivos() {
 // --- ruleta -----------------------------------------------------------------
 
 /** Las tres secciones, llevadas al panel de Ajustes. */
-function cuandoView() { appendTodo(settingsBody(), viewCuando()); }
+function libresView() { appendTodo(settingsBody(), viewLibres()); }
 function activosView() { appendTodo(settingsBody(), viewActivos()); }
 function ruletaView() { appendTodo(settingsBody(), viewRuleta()); }
 
@@ -731,29 +719,25 @@ const nodoSvg = (tag, attrs, texto) => {
 };
 const sinMovimiento = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** El bombo, con un sector por persona. Los nombres van **derechos** en el centro
- *  de su sector (girados con el sector se leen del revés) y el grupo entero es lo
- *  que rota; el puntero de arriba se queda quieto. */
-function rueda(pool, { grande = false } = {}) {
+/** El bombo, con un sector por persona. **Sin nombres dentro**: en la mitad de
+ *  abajo quedarían del revés y con mucha gente no caben. Los nombres se leen en
+ *  la lista de debajo, todos del mismo tamaño y derechos, y el sector que está
+ *  bajo el puntero se resalta. `data-centro` guarda el ángulo del centro del
+ *  sector ya con el origen en el puntero (arriba), que es lo que hace falta
+ *  para parar encima. */
+function rueda(pool) {
   const n = pool.length;
   const R = 100, C = 110, rint = 42;
   const svg = nodoSvg("svg", {
-    viewBox: "0 0 220 220", class: `rueda${grande ? " grande" : ""}`,
-    role: "img", "aria-label": `Ruleta con ${n} ${n === 1 ? "persona" : "personas"}: ${pool.map((p) => p.name).join(", ")}`,
+    viewBox: "0 0 220 220", class: "rueda", role: "img",
+    "aria-label": `Ruleta con ${n} ${n === 1 ? "persona" : "personas"} del bombo`,
   });
-  if (!n) {
-    svg.append(nodoSvg("circle", { cx: C, cy: C, r: R, fill: "var(--line-soft)" }));
-    svg.append(nodoSvg("text", { x: C, y: C, "text-anchor": "middle", "dominant-baseline": "middle",
-      fill: "var(--muted)", "font-size": 13 }, "nadie"));
-    return svg;
-  }
   const g = nodoSvg("g", { class: "rueda-giro" });
   g.style.transformOrigin = `${C}px ${C}px`;
   const ancho = 360 / n;
   const rad = (x) => (x * Math.PI) / 180;
   pool.forEach((p, i) => {
-    // El primer sector arranca arriba, donde está el puntero, y no a la derecha
-    // como en un reloj: si no, el primer nombre sale siempre en el mismo lado.
+    // El primer sector arranca en el puntero, arriba, y no a la derecha.
     const desde = i * ancho - 90, hasta = desde + ancho;
     const x0 = C + R * Math.cos(rad(desde)), y0 = C + R * Math.sin(rad(desde));
     const x1 = C + R * Math.cos(rad(hasta)), y1 = C + R * Math.sin(rad(hasta));
@@ -761,78 +745,109 @@ function rueda(pool, { grande = false } = {}) {
       + ` A ${R} ${R} 0 ${ancho > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z`;
     g.append(nodoSvg("path", {
       d, fill: i % 2 ? "var(--accent-soft)" : "var(--card)",
-      stroke: "var(--line)", "stroke-width": 1,
-      "data-nombre": p.name, "data-grados": i * ancho, "data-ancho": ancho,
+      stroke: "var(--card)", "stroke-width": 1.5,
+      "data-nombre": p.name,
+      "data-centro": String(desde + ancho / 2),
     }));
-    // Con mucha gente solo caben las iniciales; con poca, el nombre de pila.
-    const texto = n > 14 ? p.name.slice(0, 1).toUpperCase()
-      : n > 7 ? p.name.split(" ")[0].slice(0, 8) : p.name.split(" ")[0];
-    if (!texto) return;
-    const medio = desde + ancho / 2;
-    const radio = rint + (R - rint) / 2;
-    const t = nodoSvg("text", {
-      x: (C + radio * Math.cos(rad(medio))).toFixed(2),
-      y: (C + radio * Math.sin(rad(medio))).toFixed(2),
-      class: "rueda-n", "text-anchor": "middle", "dominant-baseline": "central",
-      "font-size": texto.length > 8 ? 8 : texto.length > 5 ? 9.5 : 11,
-    }, texto);
-    g.append(t);
   });
-  svg.append(g);
-  svg.append(nodoSvg("circle", { cx: C, cy: C, r: rint, fill: "var(--card)", stroke: "var(--line)" }));
+  svg.append(g,
+    nodoSvg("circle", { cx: C, cy: C, r: R, fill: "none", stroke: "var(--line)", "stroke-width": 1.5 }),
+    nodoSvg("circle", { cx: C, cy: C, r: rint, fill: "var(--card)", stroke: "var(--line)", "stroke-width": 1.5 }));
   return svg;
 }
 
-/** La rueda y su animación: arranca girando, y al aterrizar se para con el
- *  ganador bajo el puntero. Devuelve el grupo para poder moverlo. */
+/** La rueda con su lista y su animación: se pone a girar antes de que conteste
+ *  el servidor, va marcando lo que va pasando por el puntero y para encima de
+ *  quien salió. */
 function rodar(pool) {
+  const n = pool.length;
+  const ancho = 360 / n;
   const marco = el("div", { className: "rueda-marco" });
-  const hub = el("div", { className: "rueda-hub", textContent: "" });
-  const svg = rueda(pool, { grande: true });
+  const hub = el("div", { className: "rueda-hub" }, el("span", { className: "rueda-hub-n", textContent: "Girando…" }));
+  const svg = rueda(pool);
   marco.append(svg, el("span", { className: "rueda-flecha" }), hub);
   const g = svg.querySelector(".rueda-giro");
+  const sector = (i) => g.querySelector(`path[data-nombre="${CSS.escape(pool[i % n].name)}"]`);
+  const lista = el("div", { className: "rueda-bombo" },
+    ...pool.map((p) => el("span", { className: "chip bomba", "data-nombre": p.name }, p.name)));
 
+  let actual = null;
   const api = {
+    actual: null,
     nodo: el("div", { className: "ruleta-caja girando" }, marco,
-      el("p", { className: "rueda-pie", textContent: "Girando…" })),
-    /** El movimiento de partida: sin transición, a un ángulo cualquiera. */
+      el("p", { className: "rueda-pie", textContent: "Girando…" }),
+      lista),
+    /** El nombre que está bajo el puntero: el del sector resaltado, el del medio
+     *  y el de la lista. Los tres cuentan lo mismo. */
+    marcar(i) {
+      const nombre = pool[((i % n) + n) % n]?.name;
+      if (nombre === actual) return;
+      actual = nombre;
+      g.querySelectorAll("path[data-nombre]").forEach((s) =>
+        s.classList.toggle("bajo", s.dataset.nombre === nombre));
+      lista.querySelectorAll(".chip").forEach((c) =>
+        c.classList.toggle("bajo", c.dataset.nombre === nombre));
+      hub.firstElementChild.textContent = nombre || "";
+    },
+    /** El movimiento de partida: sin transición, a un ángulo cualquiera, y con
+     *  un par de vueltas de mentira para que se vea pasar gente mientras el
+     *  servidor contesta. */
     arrancar() {
-      hub.textContent = "";
       api.nodo.classList.add("girando");
       g.style.transition = "none";
-      g.style.transform = `rotate(${360 * (4 + Math.floor(Math.random() * 3)) - 41}deg)`;
-      // Sin esto el navegador no llega a pintar el ángulo inicial y no anima nada:
-      // la transición necesita un valor anterior que pueda interpolar.
+      g.style.transform = "rotate(-97deg)";
+      // Sin esto el navegador no llega a pintar el ángulo inicial y no anima
+      // nada: la transición necesita un valor anterior que pueda interpolar.
       void g.getBoundingClientRect();
+      let falsa = 0;
+      api.tocando = requestAnimationFrame(function prever() {
+        if (!api.tocando) return;
+        falsa += 23;
+        api.marcar(Math.floor(((-falsa) / ancho)));   // el mismo cálculo de abajo
+        api.tocando = requestAnimationFrame(prever);
+      });
     },
-    /** Las vueltas de verdad y el alto en el ganador. */
+    /** Las vueltas de verdad y el alto encima del ganador. El puntero está a
+     *  -90°, así que el centro del sector tiene que acabar ahí. */
     aterrizar(r) {
-      const sector = [...g.querySelectorAll("path[data-nombre]")]
-        .find((x) => x.dataset.nombre === r.elegidos[0]?.name);
       const elegida = r.elegidos[0];
-      if (!sector) {
-        hub.textContent = elegida ? elegida.name : "";
-        return Promise.resolve();
-      }
-      const centro = Number(sector.dataset.grados) + Number(sector.dataset.ancho) / 2;
+      const i = pool.findIndex((p) => p.name === elegida?.name);
+      if (i < 0) return Promise.resolve();
+      const destino = -90 - Number(sector(i).dataset.centro);
       const vueltas = sinMovimiento() ? 0 : 6 + Math.floor(Math.random() * 3);
+      const total = 360 * vueltas + destino;
+      const salida = Number((g.style.transform.match(/-?[\d.]+/) || [0])[0]) || 0;
       void g.getBoundingClientRect();
-      g.style.transition = sinMovimiento()
-        ? "none"
-        : "transform 4.2s cubic-bezier(.11, .78, .12, 1)";
-      g.style.transform = `rotate(${360 * vueltas - centro}deg)`;
-      hub.textContent = elegida ? elegida.name : "";
+      g.style.transition = sinMovimiento() ? "none" : "transform 4.2s cubic-bezier(.11, .78, .12, 1)";
+      g.style.transform = `rotate(${total}deg)`;
+      // Mientras dura el frenado se va viendo el sector que pasa por el
+      // puntero, que es la gracia de una ruleta de verdad.
+      const fin = sinMovimiento() ? Date.now() : Date.now() + 4400;
+      const ver = () => {
+        const a = g.getAnimations?.()[0];
+        const p = a?.effect.getComputedTiming().progress;
+        const ang = p == null ? total : salida + (total - salida) * p;
+        api.marcar(Math.floor(-ang / ancho));
+        if (Date.now() < fin) api.tocando = requestAnimationFrame(ver);
+        else api.marcar(i);
+      };
+      ver();
       api.nodo.classList.remove("girando");
       const pie = api.nodo.querySelector(".rueda-pie");
       if (pie) pie.textContent = `${r.elegidos.length} ${r.elegidos.length === 1 ? "persona" : "personas"}`;
-      if (sinMovimiento()) return Promise.resolve();
+      if (sinMovimiento()) { api.tocando = 0; return Promise.resolve(); }
       return new Promise((listo) => {
-        g.addEventListener("transitionend", () => listo(), { once: true });
-        setTimeout(listo, 4600);   // por si el navegador no lanza el evento
+        // Los sectores también tienen transición de relleno, y esa sube hasta
+        // aquí: sin mirar la propiedad, saltaba la rueda a la primera.
+        g.addEventListener("transitionend", (e) => {
+          if (e.target === g && e.propertyName === "transform") listo();
+        });
+        setTimeout(() => { api.tocando = 0; listo(); }, 4700);
       });
     },
     /** Ya está: la rueda se va y solo quedan los nombres. */
     desvanecer() {
+      api.tocando = 0;
       const n = api.nodo;
       n.classList.add("saliendo");
       setTimeout(() => n.remove(), sinMovimiento() ? 0 : 480);
@@ -1616,7 +1631,7 @@ function addBlockSection(p) {
 // --- ajustes --------------------------------------------------------------
 
 const SECCIONES_AJUSTES = () => {
-  const t = [["cuando", "Cuándo"], ["activos", "Más activos"]];
+  const t = [["libres", "Libres"], ["activos", "Más activos"]];
   if (isAdmin()) t.push(["ruleta", "Ruleta"]);
   if (isAdmin()) t.push(["horarios", "Horarios"]);
   if (isOwner()) t.push(["miembros", "Miembros"]);
@@ -1640,7 +1655,7 @@ function openSettings(tab = S.ajustes, { foco = true } = {}) {
   const pide = ["ruleta", "activos"].includes(tab) && !S.ruleta && !S.ruletaError;
 
   const vistas = {
-    cuando: cuandoView, activos: activosView, ruleta: ruletaView,
+    libres: libresView, activos: activosView, ruleta: ruletaView,
     cuenta: accountView, horarios: schedulesView, miembros: membersView,
     grupos: groupsView, solicitudes: requestsView,
   };

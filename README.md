@@ -34,19 +34,19 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Búsqueda por nombre**, insensible a tildes y mayúsculas.
 - Los bloques consecutivos de una misma persona se unen cuando la pausa es de 10 minutos o menos.
 - **Ajustes en columna**: un botón con el símbolo de menú abre el panel; las secciones quedan a la
-  izquierda (Cuándo, Más activos, Ruleta, Horarios, Miembros, Agrupaciones, Solicitudes y Cuenta) y al
+  izquierda (Libres, Más activos, Ruleta, Horarios, Miembros, Agrupaciones, Solicitudes y Cuenta) y al
   pie la cuenta con el botón de salir. Fuera de Ajustes solo quedan la rejilla semanal y la del día.
 - **Subir PDF** como botón compacto al final de la barra de vistas, junto a *Semana* y *Por día*.
   Sigue aceptando soltar los archivos encima.
 
 **Cuándo hay más gente libre**
 
-La pregunta al revés de la rejilla. En lugar de quién está ocupado, la vista **Cuándo** recorre la
-franja elegida de *paso* en *paso* minutos, cuenta cuánta gente está libre en cada ventana de la
-duración pedida y devuelve los tramos con más gente libre a la vez, de mejor a peor:
+La pregunta al revés de la rejilla. En lugar de quién está ocupado, la vista **Libres** barre el
+día de *paso* en *paso* minutos, cuenta cuánta gente está libre en cada ventana de la duración
+pedida y devuelve los tramos con más gente libre a la vez, de mejor a peor:
 
-- Días, franja del día, duración del hueco (de 5 minutos a 24 horas) y cada cuánto se prueban los
-  huecos los decide quien pregunta.
+- Solo se pregunta **cuánto tiene que durar el hueco** (de 5 minutos a 24 horas) y cada cuánto se
+  prueban. No hay franjas que elegir: se mira el día entero.
 - Los tramos contiguos con el mismo mejor resultado se unen en uno solo: si A, B y C están libres en
   cada ventana, lo están en todo el hueco que las cubre.
 - Cada tramo enseña **quién puede venir** (los nombres libres del tramo entero) y el recuento
@@ -81,9 +81,11 @@ conteo, y son dos clases de actividad:
   para decir quién está libre en dos días a la vez.
 - **Editar y eliminar**: la ✎ corrige la ficha sin tocar el reparto ya hecho; la ✕ borra la actividad
   y su conteo.
-- **Rueda de verdad**: un sector por persona del bombo, con el nombre **derecho** en el centro de su
-  sector (girado con la rueda, la mitad de los nombres se leerían del revés). El bombo que se ve es el
-  mismo que se sortea, y con menos movimiento (si el sistema lo pide) sale el resultado sin girar.
+- **Rueda de verdad**: un sector por persona del bombo. Los nombres **no** van dentro del sector
+  (en la mitad de abajo se leerían del revés y con mucha gente no caben): se leen en la lista de
+  debajo, todos del mismo tamaño, y el sector que pasa por el puntero se resalta junto al nombre en
+  el centro. El bombo que se ve es el mismo que se sortea, y con menos movimiento (si el sistema lo
+  pide) sale el resultado sin girar.
 - **A pantalla completa**: al darle al botón, la rueda ocupa la pantalla y el fondo se difumina. Al
   pararse, la rueda se va y quedan solo los nombres de quien salió, grandes; mientras gira no se puede
   cerrar, y con `Esc` o con "Listo" se vuelve a los ajustes. El reparto ya está guardado en el

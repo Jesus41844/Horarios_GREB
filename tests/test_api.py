@@ -733,6 +733,21 @@ def test_buscar_los_tramos_con_mas_gente_libre(client):
     assert lunes[0]["disponibles"] == ["Ana Gómez", "Juan Pérez", "Luis Soto"]
 
 
+def test_los_tramos_se_buscan_sin_que_nadie_elija_franja(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    alta(client, "greb", "Luis Soto", 0, "07:00", "12:00")
+
+    # Sin franja en la petición: se barre el día entero y el mejor hueco llega
+    # hasta donde termina el día que se mira, que es lo que se puede mirar.
+    r = client.get("/api/g/greb/libre", params={"dias": "1", "duracion": 60})
+    assert r.status_code == 200
+    huecos = r.json()
+    assert (huecos[0]["start"], huecos[0]["end"]) == (7 * 60, 23 * 60)
+    assert huecos[0]["disponibles"] == ["Ana Gómez", "Luis Soto"]
+    assert huecos[0]["ocupados"] == []
+
+
 def test_el_hueco_se_mide_por_la_duracion_pedida(client):
     login(client, "greb@x.com")
     for n in ("Ana Gómez", "Juan Pérez"):

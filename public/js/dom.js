@@ -2,7 +2,14 @@
 // como HTML: los nombres vienen de archivos subidos y no son de fiar.
 
 export function el(tag, props = {}, ...kids) {
-  const node = Object.assign(document.createElement(tag), props);
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    // Object.assign los dejaría como una propiedad suelta del nodo y no como
+    // atributo, y un `data-nombre` que no es atributo no lo encuentra ningún
+    // selector. Con aria- pasa igual.
+    if (k.startsWith("data-") || k.startsWith("aria-")) node.setAttribute(k, v);
+    else node[k] = v;
+  }
   for (const kid of kids.flat()) if (kid != null && kid !== false) node.append(kid);
   return node;
 }

@@ -127,6 +127,23 @@ button, input, select { font: inherit; color: inherit; }
 }
 .spacer { flex: 1 1 auto; }
 
+/* La barra de secciones, debajo de la cabecera. Lo que se mira a diario; lo que
+   se configura, en Ajustes. */
+.top-nav {
+  max-width: 1720px; margin: 0 auto; padding: 0 20px 10px;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.top-nav button {
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 14px;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.top-nav button:hover { color: var(--ink); border-color: var(--muted); }
+.top-nav button[aria-current="page"] {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+  font-weight: 600;
+}
+
 /* --- estructura --------------------------------------------------------- */
 
 /* En escritorio la rejilla es el contenido principal: que ocupe la pantalla. */

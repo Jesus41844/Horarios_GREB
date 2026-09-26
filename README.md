@@ -33,9 +33,11 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Ficha por persona**, con su semana completa, materia, aula y marcas de laboratorio o grupo.
 - **Búsqueda por nombre**, insensible a tildes y mayúsculas.
 - Los bloques consecutivos de una misma persona se unen cuando la pausa es de 10 minutos o menos.
-- **Ajustes en columna**: un botón con el símbolo de menú abre el panel; las secciones quedan a la
-  izquierda (Libres, Más activos, Ruleta, Horarios, Miembros, Agrupaciones, Solicitudes y Cuenta) y al
-  pie la cuenta con el botón de salir. Fuera de Ajustes solo quedan la rejilla semanal y la del día.
+- **Barra de secciones** debajo de la cabecera, con lo que se mira a diario: *Horario*, *Libres*,
+  *Más activos* y *Ruleta* (esta última solo para quien administra). La sección abierta se marca.
+- **Ajustes en columna**: un botón con el símbolo de menú abre el panel; allí queda lo que se
+  configura (Horarios, Miembros, Agrupaciones, Solicitudes y Cuenta) y al pie la cuenta con el botón
+  de salir.
 - **Subir PDF** como botón compacto al final de la barra de vistas, junto a *Semana* y *Por día*.
   Sigue aceptando soltar los archivos encima.
 

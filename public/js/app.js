@@ -14,7 +14,8 @@ const S = {
   slug: null,
   week: [],
   roster: [],
-  view: "semana",   // "semana" (rejilla L-V) o "dia"; lo demás vive en Ajustes
+  seccion: "horario",   // qué se está mirando: horario, libres, activos, ruleta
+  view: "semana",   // dentro del horario: "semana" (rejilla L-V) o "dia"
   day: todayIndex(),
   query: "",
   report: null,
@@ -189,6 +190,9 @@ function enter(me) {
   const saved = remembered();
   S.slug = S.groups.some((g) => g.slug === saved) ? saved : S.groups[0]?.slug || null;
   S.report = null;
+  // Cada cuenta entra en su horario: la sección que se había dejado puede no
+  // existir para esta cuenta (la ruleta es de quienes administran).
+  S.seccion = "horario";
   load();
 }
 
@@ -235,6 +239,13 @@ function header() {
     },
   });
 
+  const secciones = el("nav", { className: "top-nav", ariaLabel: "Secciones" },
+    ...SECCIONES().map(([id, label]) => el("button", {
+      type: "button", textContent: label,
+      ...(S.seccion === id ? { "aria-current": "page" } : {}),
+      onclick: () => irA(id),
+    })));
+
   return el("header", { className: "top" },
     el("div", { className: "top-in" },
       el("div", { className: "brand" }, "Horari", el("span", { textContent: "os" })),
@@ -247,7 +258,8 @@ function header() {
         onclick: () => openSettings(S.pending ? "solicitudes" : S.ajustes),
       },
         el("span", { className: "hamb", ariaHidden: "true" }),
-        S.pending ? el("span", { className: "badge", textContent: String(S.pending) }) : null)));
+        S.pending ? el("span", { className: "badge", textContent: String(S.pending) }) : null)),
+    S.slug ? secciones : null);
 }
 
 function body(error) {
@@ -269,6 +281,17 @@ function body(error) {
   const out = [];
   if (S.report) out.push(reportCard(S.report));
 
+  if (S.query.trim()) {
+    out.push(...searchResults());
+    return out;
+  }
+
+  // Las secciones de la barra se pintan enteras, sin el andamiaje de la rejilla.
+  if (S.seccion !== "horario") {
+    const vistas = { libres: viewLibres, activos: viewActivos, ruleta: viewRuleta };
+    return out.concat(vistas[S.seccion]());
+  }
+
   if (!S.roster.length) {
     out.push(el("div", { className: "empty" },
       el("strong", { textContent: "Aún no hay horarios" }),
@@ -276,11 +299,6 @@ function body(error) {
         ? "Sube los PDF: el nombre del archivo es el nombre de la persona."
         : "Quien administra la agrupación todavía no ha subido ninguno."),
       isAdmin() ? dropzone() : null);
-    return out;
-  }
-
-  if (S.query.trim()) {
-    out.push(...searchResults());
     return out;
   }
 
@@ -302,8 +320,24 @@ function body(error) {
   return out;
 }
 
-/** La rejilla, y al final el botón de subir. Lo demás está en Ajustes, en la
- *  columna de la izquierda. */
+/** Las secciones de la barra de arriba: lo que se mira a diario. Lo que se
+ *  configura sigue en Ajustes, en la columna de la izquierda. */
+const SECCIONES = () => {
+  const t = [["horario", "Horario"], ["libres", "Libres"], ["activos", "Más activos"]];
+  if (isAdmin()) t.push(["ruleta", "Ruleta"]);
+  return t;
+};
+
+/** Cambia de sección. Ruleta y Más activos necesitan datos que aún no están: se
+ *  piden al llegar, no solo cuando se redibuja la página de detrás. */
+function irA(seccion) {
+  S.seccion = SECCIONES().some(([id]) => id === seccion) ? seccion : "horario";
+  render();
+  if (["activos", "ruleta"].includes(S.seccion) && !S.ruleta && !S.ruletaError) cargarRuleta();
+}
+
+/** La rejilla, y al final el botón de subir. Lo demás está en la barra o en
+ *  Ajustes, en la columna de la izquierda. */
 function viewBar() {
   return el("div", { className: "viewbar" },
     el("div", { className: "tabs-group", role: "tablist", ariaLabel: "Vista" },
@@ -317,10 +351,9 @@ function viewBar() {
     isAdmin() ? dropzone() : null);
 }
 
-// --- quién está libre -------------------------------------------------------
-// Las tres secciones siguientes (Libres, Más activos y Ruleta) viven dentro del
-// sidebar de Ajustes, así que se pintan en el panel y no en la página. Sus
-// acciones repintan el panel con repintarAjustes() en lugar de render().
+// --- secciones de la barra -------------------------------------------------
+// Libres, Más activos y Ruleta se pintan enteras en la página, así que lo que
+// pasa en ellas se redibuja con render() como lo de la rejilla.
 
 /** "Libres": la pregunta al revés de la rejilla. Se escribe un intervalo, de
  *  12:00 a 13:00, y contesta **quién está libre de 12:00 a 13:00** con los
@@ -332,7 +365,7 @@ function viewLibres() {
 
   const marcar = (d) => {
     q.dias = q.dias.includes(d) ? q.dias.filter((x) => x !== d) : [...q.dias, d];
-    repintarAjustes();
+    render();
   };
   const hora = (clave) => el("input", {
     type: "time", value: q[clave], ariaLabel: clave === "desde" ? "Desde" : "Hasta",
@@ -343,8 +376,8 @@ function viewLibres() {
     className: "card panel-form",
     onsubmit: async (e) => {
       e.preventDefault();
-      if (!q.dias.length) { q.error = "Elige al menos un día."; return repintarAjustes(); }
-      q.cargando = true; q.error = null; repintarAjustes();
+      if (!q.dias.length) { q.error = "Elige al menos un día."; return render(); }
+      q.cargando = true; q.error = null; render();
       try {
         // El intervalo entero: el servidor lo busca tal cual y, si nadie está
         // libre todo ese rato, se lo parte para decir qué sí se puede.
@@ -355,7 +388,7 @@ function viewLibres() {
         q.error = err.message; q.resultados = null;
       }
       q.cargando = false;
-      repintarAjustes();
+      render();
     },
   },
     el("div", { className: "campo" },
@@ -450,16 +483,6 @@ function viewActivos() {
 
 // --- ruleta -----------------------------------------------------------------
 
-/** Las tres secciones, llevadas al panel de Ajustes. */
-function libresView() { appendTodo(settingsBody(), viewLibres()); }
-function activosView() { appendTodo(settingsBody(), viewActivos()); }
-function ruletaView() { appendTodo(settingsBody(), viewRuleta()); }
-
-/** append() pondría "null" en el texto si alguna vista devuelve un hueco vacío. */
-function appendTodo(box, nodos) {
-  return box.append(...nodos.filter((n) => n != null && n !== false));
-}
-
 let ruletaPeticion = null;   // agrupación que se está pidiendo, para no duplicar
 
 async function cargarRuleta({ force = false } = {}) {
@@ -478,10 +501,7 @@ async function cargarRuleta({ force = false } = {}) {
     S.ruleta = null;
     S.ruletaError = err.message;
   }
-  // Los datos se ven dentro del sidebar de Ajustes, así que quien hay que
-  // redibujar es el panel; la página de detrás solo si el panel está cerrado.
-  if (panel.classList.contains("on")) repintarAjustes();
-  else render();
+  render();   // la ruleta y el who's who se ven en la página
 }
 
 function viewRuleta() {
@@ -535,7 +555,7 @@ function formActividad(act = null) {
     onclick: () => {
       if (c.modo === "horario") c.dias = [n];          // con hora fija, un solo día
       else c.dias = c.dias.includes(n) ? c.dias.filter((x) => x !== n) : [...c.dias, n].sort();
-      repintarAjustes();
+      render();
     },
   });
 
@@ -544,7 +564,7 @@ function formActividad(act = null) {
     onchange: (e) => {
       c.modo = e.target.value;
       if (c.modo === "horario") c.dias = [c.dias[0] ?? todayIndex()];   // solo uno
-      repintarAjustes();
+      render();
     },
   },
     el("option", { value: "ventas", textContent: "Venta (todo el día)", selected: c.modo === "ventas" }),
@@ -617,7 +637,7 @@ function formActividad(act = null) {
       act
         ? el("button", {
           className: "btn", type: "button", textContent: "Cancelar",
-          onclick: () => { S.editando = null; S.borrador = null; repintarAjustes(); },
+          onclick: () => { S.editando = null; S.borrador = null; render(); },
         })
         : null));
 }
@@ -650,7 +670,7 @@ function tarjetaActividad(a) {
           S.editando = a.id;
           S.borrador = null;    // se rellena con los datos de esa actividad
           S.ultimo = null;
-          repintarAjustes();
+          render();
         },
       }),
       el("button", {
@@ -705,7 +725,7 @@ async function girar(a) {
   // El reparto ya está en el servidor (por eso salvan las Participation). Al
   // volver, quien sale deja de estar en el bombo y su strike se queda a cero.
   await cargarRuleta({ force: true });
-  repintarAjustes();
+  render();
 }
 
 const NS = "http://www.w3.org/2000/svg";
@@ -1629,8 +1649,7 @@ function addBlockSection(p) {
 // --- ajustes --------------------------------------------------------------
 
 const SECCIONES_AJUSTES = () => {
-  const t = [["libres", "Libres"], ["activos", "Más activos"]];
-  if (isAdmin()) t.push(["ruleta", "Ruleta"]);
+  const t = [];
   if (isAdmin()) t.push(["horarios", "Horarios"]);
   if (isOwner()) t.push(["miembros", "Miembros"]);
   if (S.user.is_superadmin) {
@@ -1648,12 +1667,8 @@ function openSettings(tab = S.ajustes, { foco = true } = {}) {
   const tabs = SECCIONES_AJUSTES();
   if (!tabs.some(([id]) => id === tab)) tab = "cuenta";
   S.ajustes = tab;
-  // Ruleta y Más activos necesitan datos que aún no están: se piden al abrirlos,
-  // no solo cuando se redibuja la página de detrás.
-  const pide = ["ruleta", "activos"].includes(tab) && !S.ruleta && !S.ruletaError;
 
   const vistas = {
-    libres: libresView, activos: activosView, ruleta: ruletaView,
     cuenta: accountView, horarios: schedulesView, miembros: membersView,
     grupos: groupsView, solicitudes: requestsView,
   };
@@ -1675,13 +1690,6 @@ function openSettings(tab = S.ajustes, { foco = true } = {}) {
       nav,
       el("div", { className: "side-body", id: "settings-body" })));
   vistas[tab]();
-  if (pide) cargarRuleta();
-}
-
-/** Vuelve a pintar la sección abierta sin cerrarla: los datos llegan después y
- *  hay que enseñarlos donde están, no en la página de detrás. */
-function repintarAjustes() {
-  if (panel.classList.contains("on") && S.slug) openSettings(S.ajustes, { foco: false });
 }
 
 function settingsBody() {

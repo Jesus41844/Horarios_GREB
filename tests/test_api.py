@@ -266,6 +266,23 @@ def test_admin_de_grupo_no_ve_ni_aprueba_solicitudes(client):
     assert "pending" not in client.get("/api/auth/me").json()
 
 
+def test_cuantas_clases_tiene_cada_uno(client):
+    """El navegador lo necesita para no volver a subir quien ya tiene horario."""
+    login(client, "greb@x.com")
+    upload(client, "greb", "Juan Pérez")
+    gente = {p["name"]: p for p in client.get("/api/g/greb/people").json()}
+    assert gente["Juan Pérez"]["class_blocks"] > 0
+    assert gente["Juan Pérez"]["work_blocks"] == 0
+
+    # El que solo tiene horario de trabajo todavía puede subir sus clases.
+    client.post("/api/g/greb/blocks", json={
+        "name": "Solo Trabajo", "replace_kind": "clase",
+        "blocks": [{"day": 1, "start": "09:00", "end": "17:00", "kind": "trabajo"}]})
+    gente = {p["name"]: p for p in client.get("/api/g/greb/people").json()}
+    assert (gente["Solo Trabajo"]["work_blocks"], gente["Solo Trabajo"]["class_blocks"]) == (1, 0)
+    client.post("/api/auth/logout")
+
+
 def test_borrar_horarios_uno_a_uno_y_de_golpe(client):
     login(client, "greb@x.com")
     for nombre in ("Juan Pérez", "Ana Gómez", "Luis Ramos"):

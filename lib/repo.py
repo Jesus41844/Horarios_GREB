@@ -343,7 +343,11 @@ def list_people(c: Conn, group_id: int) -> list[dict]:
     return c.query(
         "SELECT p.name, p.filename, p.uploaded_at, "
         "  (SELECT COUNT(*) FROM horarios.blocks b "
-        "   WHERE b.person_id = p.id AND b.kind = 'trabajo') AS work_blocks "
+        "   WHERE b.person_id = p.id AND b.kind = 'trabajo') AS work_blocks, "
+        # Las clases ya subidas: quien tenga alguna ya tiene horario y al volver
+        # a subirle el archivo se le pisarían todas.
+        "  (SELECT COUNT(*) FROM horarios.blocks b "
+        "   WHERE b.person_id = p.id AND b.kind = 'clase') AS class_blocks "
         "FROM horarios.people p WHERE p.group_id = ? ORDER BY p.key",
         (group_id,),
     )

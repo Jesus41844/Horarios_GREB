@@ -71,6 +71,9 @@ intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 
 - **Horario laboral**: franjas de trabajo que cuentan como ocupación igual que una clase.
 - **Informe de subida** por archivo, con el nombre exacto y el motivo de cada fallo; un archivo
   defectuoso no bloquea al resto.
+- **No se vuelve a subir lo que ya está**: al soltar varios archivos, los de quien ya tiene clases
+  guardadas se apartan y se listan aparte con su número de clases, porque al subirlos se le
+  reemplazarían todas. La casilla **Repetir los que ya están** los deja pasar.
 - **Clases virtuales excluidas**: las que no ocupan físicamente a nadie no cuentan como tiempo
   ocupado (véase [Limitaciones conocidas](#limitaciones-conocidas)).
 

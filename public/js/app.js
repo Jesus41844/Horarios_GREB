@@ -16,6 +16,7 @@ const S = {
   roster: [],
   seccion: "horario",   // qué se está mirando: horario, libres, activos, ruleta
   view: "semana",   // dentro del horario: "semana" (rejilla L-V) o "dia"
+  repetir: false,   // volver a subir los archivos de quien ya tiene horario
   day: todayIndex(),
   query: "",
   report: null,
@@ -1235,7 +1236,7 @@ function dropzone() {
   const input = el("input", {
     type: "file", accept: ".pdf,application/pdf,image/*", multiple: true, className: "sr-only",
   });
-  const zone = el("label", {
+  const zona = el("label", {
     className: "drop",
     title: "Suelta aquí los PDF o las imágenes. El nombre del archivo es el nombre de la persona.",
   },
@@ -1244,29 +1245,61 @@ function dropzone() {
 
   input.addEventListener("change", () => { const f = [...input.files]; input.value = ""; upload(f); });
   ["dragenter", "dragover"].forEach((ev) =>
-    zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add("over"); }));
+    zona.addEventListener(ev, (e) => { e.preventDefault(); zona.classList.add("over"); }));
   ["dragleave", "drop"].forEach((ev) =>
-    zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.remove("over"); }));
-  zone.addEventListener("drop", (e) => upload([...e.dataTransfer.files]));
-  return zone;
+    zona.addEventListener(ev, (e) => { e.preventDefault(); zona.classList.remove("over"); }));
+  zona.addEventListener("drop", (e) => upload([...e.dataTransfer.files]));
+
+  // El filtro de "ya está subido" se puede desactivar, porque hay motivos para
+  // rehacer un horario: la casilla vive fuera de la etiqueta para que al
+  // marcarla no se abra el diálogo de archivos.
+  const repetir = el("input", {
+    type: "checkbox", checked: S.repetir,
+    onchange: (e) => { S.repetir = e.target.checked; },
+  });
+  return el("span", { className: "drop-wrap" }, zona,
+    el("label", { className: "check", title: "Volver a subir los archivos de quien ya tiene horario" },
+      repetir, el("span", { textContent: "Repetir los que ya están" })));
 }
 
 const esImagen = (f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name);
 
+/** La persona a la que pertenece un archivo, si ya tiene horario subido.
+ *
+ * Al guardar se le reemplazan todas sus clases, así que volver a subirle el
+ * mismo horario sin querer no solo gastaría el OCR: le pisaría lo que tuviera.
+ * Con veinte archivos de golpe, lo normal es que algunos ya estén dentro. */
+function yaTieneHorario(nombre) {
+  const n = norm(nombre);
+  return S.roster.find((p) => norm(p.name) === n && p.class_blocks > 0);
+}
+
 async function upload(files) {
   if (!files.length) return;
-  const imagenes = files.filter(esImagen);
-  files = files.filter((f) => !esImagen(f));
-  // Las imágenes no se guardan directamente: se leen y se revisan antes.
-  if (imagenes.length) {
-    if (files.length) await upload(files);
-    return revisarImagen(imagenes[0], imagenes.slice(1));
-  }
+  // Quien ya tiene horario se aparta, y se avisa de cada archivo omitido.
   const results = [];
+  let quedan = files;
+  if (!S.repetir) {
+    quedan = [];
+    for (const f of files) {
+      const quien = yaTieneHorario(person_from_filename(f.name));
+      if (quien) results.push({
+        file: f.name, ok: true, name: quien.name, skip: true, blocks: quien.class_blocks,
+      });
+      else quedan.push(f);
+    }
+  }
+  if (!quedan.length) {
+    S.report = { results };
+    render();
+    return;
+  }
+  const imagenes = quedan.filter(esImagen);
+  const pdfs = quedan.filter((f) => !esImagen(f));
   // Un archivo por petición: Vercel limita el tamaño de cada una y así un
   // archivo roto no se lleva por delante a los demás.
-  for (const [i, file] of files.entries()) {
-    S.report = { progress: `Leyendo ${i + 1} de ${files.length}: ${file.name}` };
+  for (const [i, file] of pdfs.entries()) {
+    S.report = { results, progress: `Leyendo ${i + 1} de ${pdfs.length}: ${file.name}` };
     render();
     try {
       const data = await api.upload(S.slug, file);
@@ -1275,36 +1308,41 @@ async function upload(files) {
       results.push({ file: file.name, ok: false, error: err.message });
     }
   }
+  // Las imágenes no se guardan directamente: se leen y se revisan antes.
+  if (imagenes.length) {
+    if (!pdfs.length) await load();
+    return revisarImagen(imagenes[0], imagenes.slice(1), results);
+  }
   S.report = { results };
   await load();
 }
 
 /** Lee la imagen y abre la revisión. Nada se guarda hasta que el admin confirma. */
-async function revisarImagen(file, pendientes = []) {
-  S.report = { progress: `Leyendo ${file.name}… la primera vez tarda, descarga el lector.` };
+async function revisarImagen(file, pendientes = [], previos = []) {
+  S.report = { results: previos, progress: `Leyendo ${file.name}… la primera vez tarda, descarga el lector.` };
   render();
   let bloques;
   try {
     bloques = await leerImagen(file, (p) => {
-      S.report = { progress: `Leyendo ${file.name}… ${Math.round(p * 100)} %` };
+      S.report = { results: previos, progress: `Leyendo ${file.name}… ${Math.round(p * 100)} %` };
       render();
     });
   } catch (err) {
-    S.report = { results: [{ file: file.name, ok: false, error: err.message }] };
+    S.report = { results: [...previos, { file: file.name, ok: false, error: err.message }] };
     render();
-    if (pendientes.length) await revisarImagen(pendientes[0], pendientes.slice(1));
+    if (pendientes.length) return revisarImagen(pendientes[0], pendientes.slice(1), previos);
     return;
   }
   S.report = null;
   render();
-  panelRevision(person_from_filename(file.name), bloques, pendientes, bloques.virtuales || 0);
+  panelRevision(person_from_filename(file.name), bloques, pendientes, bloques.virtuales || 0, previos);
 }
 
 const person_from_filename = (nombre) =>
   nombre.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 
 /** Tabla editable con lo que se leyó. El OCR se equivoca: esto es el filtro. */
-function panelRevision(nombre, bloques, pendientes = [], virtuales = 0) {
+function panelRevision(nombre, bloques, pendientes = [], virtuales = 0, saltados = []) {
   const filas = bloques.map((b) => ({ ...b }));
   const note = el("div");
   const cuerpo = el("div");
@@ -1367,7 +1405,10 @@ function panelRevision(nombre, bloques, pendientes = [], virtuales = 0) {
           })),
         });
         closePanel();
-        S.report = { results: [{ file: `imagen de ${quien}`, ok: true, name: quien, blocks: filas.length }] };
+        S.report = { results: [
+          ...saltados,
+          { file: `imagen de ${quien}`, ok: true, name: quien, blocks: filas.length },
+        ] };
         await load();
         if (pendientes.length) await revisarImagen(pendientes[0], pendientes.slice(1));
       } catch (err) {
@@ -1383,6 +1424,11 @@ function panelRevision(nombre, bloques, pendientes = [], virtuales = 0) {
       ? el("p", { className: "note ok",
         textContent: `${virtuales} clase${virtuales > 1 ? "s virtuales quedaron" : " virtual quedó"} fuera.` })
       : null,
+    saltados.length
+      ? el("p", { className: "sub", textContent:
+        `${saltados.length} archivo${saltados.length > 1 ? "s" : ""} no se leyó: `
+        + `${saltados.map((r) => r.file).join(", ")}, porque ya había un horario con ese nombre.` })
+      : null,
     note,
     el("label", { className: "field" }, el("span", { textContent: "¿De quién es este horario?" }), nombreInput),
     cuerpo,
@@ -1390,7 +1436,7 @@ function panelRevision(nombre, bloques, pendientes = [], virtuales = 0) {
       className: "btn", type: "button", textContent: "Añadir una fila",
       onclick: () => { filas.push({ day: 0, start: 420, end: 465, subject: "", room: "", kind: "clase" }); pintar(); },
     }),
-    el("p", { className: "sub", textContent: "Al guardar se reemplazan las clases que ya tuviera. Su horario de trabajo no se toca." }),
+    el("p", { className: "sub", textContent: "Al guardar se reemplazan las clases que ya tuviera esa persona. Su horario de trabajo no se toca." }),
     guardar);
 }
 
@@ -1398,14 +1444,20 @@ const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String
 const deHhmm = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 
 function reportCard(report) {
-  if (report.progress) {
-    return el("div", { className: "report" }, el("h2", { textContent: report.progress }));
-  }
-  const failed = report.results.filter((r) => !r.ok).length;
-  const ok = report.results.length - failed;
+  const results = report.results || [];
+  const failed = results.filter((r) => !r.ok).length;
+  const ok = results.filter((r) => r.ok && !r.skip).length;
+  const saltados = results.filter((r) => r.skip).length;
   const list = el("ul");
   // Los fallos van primero y con el nombre exacto del archivo.
-  [...report.results].sort((a, b) => a.ok - b.ok).forEach((r) => {
+  [...results].sort((a, b) => a.ok - b.ok).forEach((r) => {
+    if (r.skip) {
+      list.append(el("li", { className: "skip" },
+        el("span", { className: "f", textContent: `⤼ ${r.file}` }),
+        el("span", { className: "why", textContent:
+          ` — ${r.name} ya tenía ${r.blocks} ${r.blocks === 1 ? "clase" : "clases"}, no se volvió a subir` })));
+      return;
+    }
     list.append(r.ok
       ? el("li", { className: "good" },
         el("span", { className: "f", textContent: `✓ ${r.file}` }),
@@ -1417,8 +1469,12 @@ function reportCard(report) {
         el("span", { className: "f", textContent: `✕ ${r.file}` }),
         el("span", { className: "why", textContent: ` — ${r.error}` })));
   });
+  const partes = [];
+  if (report.progress) partes.push(report.progress);
+  if (ok || failed) partes.push(failed ? `${ok} leídos · ${failed} con fallo` : `${ok} leídos, todo bien`);
+  if (saltados) partes.push(`${saltados} sin subir, ya estaban`);
   return el("div", { className: "report" },
-    el("h2", { textContent: failed ? `${ok} leídos · ${failed} con fallo` : `${ok} leídos, todo bien` }),
+    el("h2", { textContent: partes.join(" · ") || "Nada que subir" }),
     list);
 }
 

@@ -692,3 +692,369 @@ def test_no_se_pueden_teclear_clases_virtuales(client):
     trabajo = {**virtual, "kind": "trabajo", "room": "Sala 3-N01"}
     assert client.post("/api/g/greb/blocks", json={"name": "Juan Pérez",
                                                    "blocks": [trabajo]}).status_code == 200
+
+
+# --- buscar los horarios donde se esté más libre -----------------------------
+
+
+def alta(client, slug, name, day, start, end, kind="clase"):
+    """Da de alta a alguien con un bloque, sin PDF: también sirve para el trabajo."""
+    return client.post(f"/api/g/{slug}/blocks", json={
+        "name": name, "blocks": [{"day": day, "start": start, "end": end,
+                                  "subject": "X", "room": "aula 3-405", "kind": kind}]})
+
+
+def test_buscar_los_tramos_con_mas_gente_libre(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    alta(client, "greb", "Juan Pérez", 0, "07:00", "12:00")
+    alta(client, "greb", "Luis Soto", 0, "07:00", "12:00")
+    alta(client, "greb", "Marta Ruiz", 0, "06:00", "23:00")   # ocupa toda la franja
+
+    r = client.get("/api/g/greb/libre", params={
+        "dias": "0,1", "desde": "07:00", "hasta": "22:00", "duracion": 60})
+    assert r.status_code == 200
+    huecos = r.json()
+    assert all(set(h) == {"day", "start", "end", "minutes", "libres", "total", "ocupados"}
+               for h in huecos)
+
+    # El martes no hay nadie: se puede la agrupación entera, y sale primero.
+    assert (huecos[0]["day"], huecos[0]["libres"], huecos[0]["total"]) == (1, 4, 4)
+    assert (huecos[0]["start"], huecos[0]["end"]) == (420, 1320)
+    assert huecos[0]["ocupados"] == []
+
+    # El lunes lo mejor son tres de cuatro, y en un solo tramo: de las 12:00 al
+    # final. Marta es la que no puede, y por eso aparece en vez de desaparecer.
+    lunes = [h for h in huecos if h["day"] == 0]
+    assert [(h["start"], h["end"], h["libres"], h["ocupados"]) for h in lunes] \
+        == [(720, 1320, 3, ["Marta Ruiz"])]
+
+
+def test_el_hueco_se_mide_por_la_duracion_pedida(client):
+    login(client, "greb@x.com")
+    for n in ("Ana Gómez", "Juan Pérez"):
+        # El lunes solo se cruzan en veinte minutos, de 15:00 a 15:20.
+        alta(client, "greb", n, 0, "07:00", "15:00")
+        alta(client, "greb", n, 0, "15:20", "20:00")
+
+    # Quince minutos caben en ese CROSS: el lunes es un hueco de dos.
+    corto = client.get("/api/g/greb/libre", params={
+        "dias": "0,1", "desde": "07:00", "hasta": "20:00", "duracion": 15}).json()
+    lunes = [h for h in corto if h["day"] == 0]
+    assert [(h["start"], h["end"], h["libres"]) for h in lunes] == [(900, 915, 2)]
+
+    # Media hora no: el lunes desaparece y solo queda el martes, entero.
+    largo = client.get("/api/g/greb/libre", params={
+        "dias": "0,1", "desde": "07:00", "hasta": "20:00", "duracion": 30}).json()
+    assert [h["day"] for h in largo] == [1]
+    assert (largo[0]["start"], largo[0]["end"], largo[0]["libres"]) == (420, 1200, 2)
+
+    # Un tramo más largo que la franja no cabe: no hay resultados, no un error.
+    imposible = client.get("/api/g/greb/libre", params={
+        "dias": "0", "desde": "07:00", "hasta": "20:00", "duracion": 900}).json()
+    assert imposible == []
+
+
+def test_buscar_libres_respeta_la_franja_y_valida(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    alta(client, "greb", "Juan Pérez", 2, "07:00", "09:00")
+
+    # La franja acota por los dos lados: nadie está libre a las tres de la mañana.
+    assert client.get("/api/g/greb/libre", params={
+        "dias": "0", "desde": "03:00", "hasta": "06:00", "duracion": 30}).json()[0]["libres"] == 2
+    # Y por el ancho: el hueco no puede salirse de la franja.
+    r = client.get("/api/g/greb/libre", params={
+        "dias": "0", "desde": "07:00", "hasta": "20:00", "duracion": 60}).json()
+    assert (r[0]["start"], r[0]["end"]) == (720, 1200)          # 12:00–20:00
+
+    for malos in ({"dias": "9"}, {"dias": "lunes"}, {"dias": ""},
+                  {"desde": "10:00", "hasta": "09:00"}, {"desde": "mediodía"},
+                  {"duracion": 0}, {"duracion": 5000}, {"paso": 0},
+                  {"paso": 90, "duracion": 60}):
+        assert client.get("/api/g/greb/libre", params=malos).status_code == 400, malos
+
+
+def test_cualquiera_puede_buscar_libres_pero_no_editar(client):
+    login(client, "ve@x.com")
+    assert client.get("/api/g/greb/libre").status_code == 200   # consultar sí
+    client.post("/api/auth/logout")
+    assert client.get("/api/g/greb/libre").status_code == 401
+
+
+# --- editar nombres ----------------------------------------------------------
+
+
+def test_renombrar_una_persona_arrastra_strikes_y_conteo(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Juan Perez", 0, "07:00", "12:00")     # sin tilde, tal cual se subió
+    assert client.put("/api/g/greb/strike", json={"name": "Juan Perez", "delta": 1}).status_code == 200
+    act = client.post("/api/g/greb/actividades", json={
+        "nombre": "Venta del viernes", "modo": "ventas", "cuantas": 1}).json()
+    client.post(f"/api/g/greb/actividad/{act['id']}/girar", json={})
+
+    r = client.put("/api/g/greb/person", json={"name": "juan perez", "new_name": "Juan Pérez"})
+    assert r.status_code == 200 and r.json()["renamed"] is True
+
+    # El nombre nuevo aparece en el padrón, y con él sus bloques.
+    assert [p["name"] for p in client.get("/api/g/greb/people").json()] == ["Juan Pérez"]
+    assert client.get("/api/g/greb/person", params={"name": "JUAN PÉREZ"}).status_code == 200
+
+    # Y no se pierden las strikes ni el conteo de participaciones.
+    ruleta = client.get("/api/g/greb/ruleta").json()
+    assert [(p["name"], p["strikes"], p["total"], p["ventas"], p["horario"])
+            for p in ruleta["personas"]] == [("Juan Pérez", 1, 1, 1, 0)]
+    assert ruleta["actividades"][0]["participantes"] == ["Juan Pérez"]
+
+
+def test_renombrar_valida_y_respeta_permisos(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    alta(client, "greb", "Juan Pérez", 0, "07:00", "12:00")
+
+    # A un nombre que ya existe no: chocarían las dos personas.
+    choque = client.put("/api/g/greb/person", json={"name": "Ana Gómez", "new_name": "Juan Pérez"})
+    assert choque.status_code == 409
+    # Vacío ni a alguien de otra agrupación.
+    assert client.put("/api/g/greb/person",
+                      json={"name": "Ana Gómez", "new_name": "  "}).status_code == 400
+    assert client.put("/api/g/greb/person",
+                      json={"name": "Fantasma", "new_name": "Otro"}).status_code == 404
+
+    # Solo cambiar tildes o mayúsculas no choca con nadie: es la misma persona,
+    # así que lo corrige igualmente.
+    igual = client.put("/api/g/greb/person", json={"name": "Ana Gómez", "new_name": "ana gómez"})
+    assert igual.status_code == 200
+    assert [p["name"] for p in client.get("/api/g/greb/people").json()] == ["ana gómez", "Juan Pérez"]
+    assert client.get("/api/g/greb/person", params={"name": "Ana Gómez"}).status_code == 200
+    client.post("/api/auth/logout")
+
+    login(client, "ve@x.com")   # solo ver
+    assert client.put("/api/g/greb/person",
+                      json={"name": "Ana Gómez", "new_name": "Otra"}).status_code == 403
+
+
+# --- ruleta ------------------------------------------------------------------
+
+
+def test_ruleta_solo_administradores(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    act = client.post("/api/g/greb/actividades",
+                      json={"nombre": "Venta", "modo": "ventas"}).json()
+    client.post("/api/auth/logout")
+
+    login(client, "ve@x.com")
+    assert client.get("/api/g/greb/ruleta").status_code == 200          # mirar sí
+    assert client.post("/api/g/greb/actividades",
+                       json={"nombre": "Otra", "modo": "ventas"}).status_code == 403
+    assert client.post(f"/api/g/greb/actividad/{act['id']}/girar", json={}).status_code == 403
+    assert client.put("/api/g/greb/strike", json={"name": "Ana", "delta": 1}).status_code == 403
+    assert client.post(f"/api/g/greb/actividad/{act['id']}/participacion",
+                       json={"name": "Ana", "participa": True}).status_code == 403
+    assert client.delete(f"/api/g/greb/actividad/{act['id']}").status_code == 403
+
+    client.post("/api/auth/logout")
+    login(client, "eurus@x.com")
+    assert client.get("/api/g/eurus/ruleta").status_code == 200
+    assert client.get("/api/g/greb/ruleta").status_code == 404           # ni existe para Eurus
+
+
+def test_ventas_usan_el_padron_y_hora_fija_mira_el_horario(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    alta(client, "greb", "Juan Pérez", 0, "07:00", "12:00")
+    alta(client, "greb", "Luis Soto", 0, "14:00", "16:00")
+
+    # Con hora fija en pleno turno de los dos primeros, solo puede salir el tercero.
+    act = client.post("/api/g/greb/actividades", json={
+        "nombre": "Charla de IA", "modo": "horario", "dia": 0,
+        "inicio": "09:00", "fin": "10:00", "cuantas": 1}).json()
+    r = client.post(f"/api/g/greb/actividad/{act['id']}/girar", json={}).json()
+    assert [e["name"] for e in r["elegidos"]] == ["Luis Soto"]
+    assert [p["name"] for p in r["pool"]] == ["Luis Soto"]
+    assert r["ocupados"] == ["Ana Gómez", "Juan Pérez"]
+
+    # A las siete de la tarde ya no hay nadie en clase, pero quien salió en la
+    # charla anterior descansa la siguiente: la regla es por tipo de actividad.
+    libre = client.post("/api/g/greb/actividades", json={
+        "nombre": "Charla de la tarde", "modo": "horario", "dia": 0,
+        "inicio": "19:00", "fin": "20:00"}).json()
+    r = client.post(f"/api/g/greb/actividad/{libre['id']}/girar", json={}).json()
+    assert r["ocupados"] == []          # nadie tiene clase a esa hora
+    assert r["descansan"] == ["Luis Soto"]
+    assert [p["name"] for p in r["pool"]] == ["Ana Gómez", "Juan Pérez"]
+
+    # Las ventas no miran el horario: es gente que está todo el día ahí.
+    venta = client.post("/api/g/greb/actividades",
+                        json={"nombre": "Venta del viernes", "modo": "ventas"}).json()
+    r = client.post(f"/api/g/greb/actividad/{venta['id']}/girar", json={}).json()
+    assert len(r["pool"]) == 3
+    assert r["elegidos"][0]["name"] in ["Ana Gómez", "Juan Pérez", "Luis Soto"]
+    assert client.get("/api/g/greb/ruleta").json()["actividades"][0]["participantes"]
+
+
+def test_quien_participo_descansa_la_siguiente(client):
+    login(client, "greb@x.com")
+    for n in ("Ana Gómez", "Juan Pérez", "Luis Soto", "Marta Ruiz"):
+        alta(client, "greb", n, 0, "07:00", "12:00")
+
+    primera = client.post("/api/g/greb/actividades",
+                          json={"nombre": "Venta 1", "modo": "ventas"}).json()
+    elegido = client.post(f"/api/g/greb/actividad/{primera['id']}/girar",
+                          json={}).json()["elegidos"][0]["name"]
+
+    segunda = client.post("/api/g/greb/actividades",
+                          json={"nombre": "Venta 2", "modo": "ventas"}).json()
+    r = client.post(f"/api/g/greb/actividad/{segunda['id']}/girar", json={}).json()
+    assert r["descansan"] == [elegido]
+    assert elegido not in [p["name"] for p in r["pool"]]
+    assert r["elegidos"][0]["name"] != elegido
+
+    # Quien gira puede saltarse la regla si de verdad hace falta.
+    r = client.post(f"/api/g/greb/actividad/{segunda['id']}/girar",
+                    json={"excluir_activos": False, "cuantas": 3}).json()
+    assert elegido in [p["name"] for p in r["pool"]]
+    assert len(r["elegidos"]) == 3
+    assert len({e["name"] for e in r["elegidos"]}) == 3     # sin repetir
+
+    # Una actividad con hora fija no manda sobre las ventas, y al revés.
+    charla = client.post("/api/g/greb/actividades", json={
+        "nombre": "Charla", "modo": "horario", "dia": 3, "inicio": "18:00", "fin": "20:00"}).json()
+    r = client.post(f"/api/g/greb/actividad/{charla['id']}/girar", json={}).json()
+    assert r["descansan"] == []      # es la primera charla: nadie descansa
+
+
+def test_strikes_suben_el_peso_de_salir(client):
+    from lib import ruleta
+
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    alta(client, "greb", "Juan Pérez", 0, "07:00", "12:00")
+
+    assert client.put("/api/g/greb/strike", json={"name": "ana gomez", "delta": 2}).json() \
+        == {"name": "ana gomez", "strikes": 2, "peso": 4.0}
+    # Ni se quitan de más, ni se aceptan saltos raros.
+    assert client.put("/api/g/greb/strike", json={"name": "Ana Gómez", "delta": -3}).json()["strikes"] == 0
+    assert client.put("/api/g/greb/strike", json={"name": "Ana Gómez", "delta": 0}).status_code == 400
+    assert client.put("/api/g/greb/strike", json={"name": "Ana Gómez", "delta": -9}).status_code == 400
+    assert client.put("/api/g/greb/strike", json={"name": "Ana Gómez", "delta": 50}).status_code == 400
+    # A alguien que no está en la agrupación no: la fila quedaría huérfana.
+    assert client.put("/api/g/greb/strike", json={"name": "Fantasma", "delta": 1}).status_code == 404
+
+    client.put("/api/g/greb/strike", json={"name": "Ana Gómez", "delta": 2, "detalle": "no avisó"})
+    venta = client.post("/api/g/greb/actividades",
+                        json={"nombre": "Venta", "modo": "ventas"}).json()
+    pesos = {p["name"]: p["peso"] for p in
+             client.post(f"/api/g/greb/actividad/{venta['id']}/girar", json={}).json()["pool"]}
+    assert pesos == {"Ana Gómez": 4.0, "Juan Pérez": 1.0}
+
+    # La cuenta sale en el padrón, con su motivo.
+    ana = [p for p in client.get("/api/g/greb/ruleta").json()["personas"]
+           if p["name"] == "Ana Gómez"][0]
+    assert (ana["strikes"], ana["detalle"], ana["peso"]) == (2, "no avisó", 4.0)
+
+    # El sorteo con peso: con un número fijo, el corte cae donde toca.
+    candidatos = [{"key": "a", "name": "Ana", "strikes": 0}, {"key": "j", "name": "Juan", "strikes": 2}]
+    fijo = type("Rng", (), {"random": staticmethod(lambda: 0.1)})()
+    assert [x["name"] for x in ruleta.sortear(candidatos, 1, fijo)] == ["Ana"]
+    fijo = type("Rng", (), {"random": staticmethod(lambda: 0.9)})()
+    assert [x["name"] for x in ruleta.sortear(candidatos, 1, fijo)] == ["Juan"]
+
+
+def test_strikes_y_conteo_no_se_mezclan_entre_agrupaciones(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    client.put("/api/g/greb/strike", json={"name": "Ana Gómez", "delta": 1})
+    client.post("/api/auth/logout")
+
+    login(client, "eurus@x.com")
+    alta(client, "eurus", "Ana Gómez", 0, "07:00", "12:00")
+    assert client.get("/api/g/eurus/ruleta").json()["personas"][0]["strikes"] == 0
+    assert client.put("/api/g/eurus/strike", json={"name": "Ana Gómez", "delta": 1}).json()["strikes"] == 1
+    client.post("/api/auth/logout")
+
+    login(client, "greb@x.com")
+    assert [p["strikes"] for p in client.get("/api/g/greb/ruleta").json()["personas"]] == [1]
+
+
+def test_reparto_se_puede_corregir_a_mano(client):
+    login(client, "greb@x.com")
+    for n in ("Ana Gómez", "Juan Pérez", "Luis Soto"):
+        alta(client, "greb", n, 0, "07:00", "12:00")
+    act = client.post("/api/g/greb/actividades",
+                      json={"nombre": "Venta", "modo": "ventas"}).json()
+    elegido = client.post(f"/api/g/greb/actividad/{act['id']}/girar",
+                          json={}).json()["elegidos"][0]["name"]
+
+    ruta = f"/api/g/greb/actividad/{act['id']}/participacion"
+    # El que no apareció se quita, y otro entra en su lugar.
+    assert client.post(ruta, json={"name": elegido, "participa": False}).status_code == 200
+    assert client.post(ruta, json={"name": "Ana Gómez", "participa": True}).status_code == 200
+    assert client.post(ruta, json={"name": "Fantasma", "participa": True}).status_code == 404
+    quedan = client.get("/api/g/greb/ruleta").json()["actividades"][0]["participantes"]
+    assert quedan == ["Ana Gómez"]
+
+    # Y en la siguiente, quien salió en esta ya descansa.
+    sig = client.post("/api/g/greb/actividades",
+                      json={"nombre": "Venta 2", "modo": "ventas"}).json()
+    r = client.post(f"/api/g/greb/actividad/{sig['id']}/girar", json={}).json()
+    assert r["descansan"] == ["Ana Gómez"]
+    assert client.post(f"/api/g/greb/actividad/{999}/girar", json={}).status_code == 404
+
+
+def test_actividades_validadas(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    for malo in ({"nombre": "  "}, {"nombre": "X", "modo": "horario", "dia": 9},
+                 {"nombre": "X", "modo": "horario", "inicio": "10:00", "fin": "09:00"},
+                 {"nombre": "X", "modo": "ventas", "cuantas": 0},
+                 {"nombre": "X", "modo": "ventas", "cuantas": 99}):
+        assert client.post("/api/g/greb/actividades", json=malo).status_code == 400, malo
+    # Un tipo de actividad que no existe lo rechaza el propio modelo.
+    assert client.post("/api/g/greb/actividades",
+                       json={"nombre": "X", "modo": "fiesta"}).status_code == 422
+
+    # Sin nadie en la agrupación no hay ruleta que girar.
+    client.delete("/api/g/greb/person", params={"name": "Ana Gómez"})
+    act = client.post("/api/g/greb/actividades",
+                      json={"nombre": "Venta", "modo": "ventas"}).json()
+    r = client.post(f"/api/g/greb/actividad/{act['id']}/girar", json={})
+    assert r.status_code == 400 and "nadie" in r.json()["detail"]
+
+    alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
+    r = client.post(f"/api/g/greb/actividad/{act['id']}/girar", json={"cuantas": 99})
+    assert r.status_code == 400
+    assert client.delete(f"/api/g/greb/actividad/{act['id']}").status_code == 200
+    assert client.get("/api/g/greb/ruleta").json()["actividades"] == []
+
+
+def test_mas_activos_cuenta_ventas_y_actividades_por_separado(client):
+    login(client, "greb@x.com")
+    for n in ("Ana Gómez", "Luis Soto", "Juan Pérez"):
+        alta(client, "greb", n, 0, "07:00", "12:00")
+    venta1 = client.post("/api/g/greb/actividades",
+                         json={"nombre": "Venta 1", "modo": "ventas"}).json()
+    venta2 = client.post("/api/g/greb/actividades",
+                         json={"nombre": "Venta 2", "modo": "ventas"}).json()
+    charla = client.post("/api/g/greb/actividades", json={
+        "nombre": "Charla", "modo": "horario", "dia": 0,
+        "inicio": "19:00", "fin": "20:00"}).json()
+
+    # Ana en las dos ventas y en la charla, Luis en una venta, Juan en ninguna.
+    for act, gente in ((venta1, ("Ana Gómez", "Luis Soto")), (venta2, ("Ana Gómez",)),
+                       (charla, ("Ana Gómez",))):
+        for n in gente:
+            r = client.post(f"/api/g/greb/actividad/{act['id']}/participacion",
+                            json={"name": n, "participa": True})
+            assert r.status_code == 200
+    # Meter dos veces a la misma persona en la misma actividad no cuenta doble.
+    client.post(f"/api/g/greb/actividad/{venta1['id']}/participacion",
+                json={"name": "Ana Gómez", "participa": True})
+
+    personas = client.get("/api/g/greb/ruleta").json()["personas"]
+    assert [(p["name"], p["total"], p["ventas"], p["horario"]) for p in personas] == [
+        ("Ana Gómez", 3, 2, 1),        # primero el más activo
+        ("Luis Soto", 1, 1, 0),
+        ("Juan Pérez", 0, 0, 0),       # sin participaciones, pero en el padrón
+    ]

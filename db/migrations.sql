@@ -19,3 +19,39 @@ create table if not exists horarios.applied_migrations (
   detail text not null default ''
 );
 alter table horarios.applied_migrations enable row level security;
+
+-- Ruleta de actividades: reparto, quién participó y strikes por ausencia.
+create table if not exists horarios.actividades (
+  id bigint generated always as identity primary key,
+  group_id bigint not null references horarios.groups(id) on delete cascade,
+  nombre text not null,
+  modo text not null check (modo in ('ventas', 'horario')),
+  dia smallint not null default 0,
+  inicio integer not null default 0,
+  fin integer not null default 0,
+  cuantas integer not null default 1,
+  creada bigint not null,
+  cerrada integer not null default 0
+);
+create index if not exists actividades_group_idx on horarios.actividades(group_id);
+
+create table if not exists horarios.participaciones (
+  actividad_id bigint not null references horarios.actividades(id) on delete cascade,
+  person_key text not null,
+  creada bigint not null,
+  primary key (actividad_id, person_key)
+);
+create index if not exists participaciones_key_idx on horarios.participaciones(person_key);
+
+create table if not exists horarios.strikes (
+  group_id bigint not null references horarios.groups(id) on delete cascade,
+  person_key text not null,
+  veces integer not null default 0,
+  detalle text not null default '',
+  actualizado bigint not null,
+  primary key (group_id, person_key)
+);
+
+alter table horarios.actividades enable row level security;
+alter table horarios.participaciones enable row level security;
+alter table horarios.strikes enable row level security;

@@ -373,3 +373,167 @@ def delete_person(c: Conn, group_id: int, name: str) -> bool:
     return c.execute(
         "DELETE FROM horarios.people WHERE group_id = ? AND key = ?", (group_id, norm(name))
     ) > 0
+
+
+def renombrar_persona(c: Conn, group_id: int, nombre: str, nuevo: str) -> bool:
+    """Corrige el nombre con que se subió el PDF y arrastra lo social con él.
+
+    Se cambia también la clave (es lo que se busca al leer) y, con ella, las
+    participaciones y las strikes: si no, una errata en el nombre dejaría a la
+    persona sin sus strikes y sin su conteo.
+    """
+    rows = c.query(
+        "SELECT id FROM horarios.people WHERE group_id = ? AND key = ?", (group_id, norm(nombre))
+    )
+    if not rows:
+        return False
+    viejo, nuevo_key = norm(nombre), norm(nuevo)
+    c.execute("UPDATE horarios.people SET name = ?, key = ? WHERE id = ?", (nuevo, nuevo_key, rows[0]["id"]))
+    c.execute(
+        "UPDATE horarios.participaciones SET person_key = ? WHERE person_key = ? "
+        "AND actividad_id IN (SELECT id FROM horarios.actividades WHERE group_id = ?)",
+        (nuevo_key, viejo, group_id),
+    )
+    c.execute(
+        "UPDATE horarios.strikes SET person_key = ? WHERE group_id = ? AND person_key = ?",
+        (nuevo_key, group_id, viejo),
+    )
+    return True
+
+
+# --- ruleta de actividades --------------------------------------------------
+
+def crear_actividad(c: Conn, group_id: int, nombre: str, modo: str, dia: int,
+                    inicio: int, fin: int, cuantas: int) -> int:
+    return c.query(
+        "INSERT INTO horarios.actividades "
+        "(group_id, nombre, modo, dia, inicio, fin, cuantas, creada) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        (group_id, nombre, modo, dia, inicio, fin, cuantas, now()),
+    )[0]["id"]
+
+
+def actividad(c: Conn, group_id: int, actividad_id: int) -> dict | None:
+    rows = c.query(
+        "SELECT id, nombre, modo, dia, inicio, fin, cuantas, creada, cerrada "
+        "FROM horarios.actividades WHERE group_id = ? AND id = ?",
+        (group_id, actividad_id),
+    )
+    return rows[0] if rows else None
+
+
+def actividades_de(c: Conn, group_id: int) -> list[dict]:
+    """Las actividades, de la más reciente a la más vieja, con quién salió en cada una."""
+    acts = c.query(
+        "SELECT id, nombre, modo, dia, inicio, fin, cuantas, creada, cerrada "
+        "FROM horarios.actividades WHERE group_id = ? ORDER BY creada DESC, id DESC",
+        (group_id,),
+    )
+    if not acts:
+        return []
+    por_id: dict[int, list[str]] = {}
+    marcas = ", ".join(["?"] * len(acts))
+    for r in c.query(
+        f"SELECT actividad_id, person_key FROM horarios.participaciones "
+        f"WHERE actividad_id IN ({marcas})",
+        tuple(a["id"] for a in acts),
+    ):
+        por_id.setdefault(r["actividad_id"], []).append(r["person_key"])
+    for a in acts:
+        a["participantes"] = sorted(por_id.get(a["id"], []))
+    return acts
+
+
+def borrar_actividad(c: Conn, group_id: int, actividad_id: int) -> bool:
+    return c.execute(
+        "DELETE FROM horarios.actividades WHERE group_id = ? AND id = ?", (group_id, actividad_id)
+    ) > 0
+
+
+def registrar_participacion(c: Conn, actividad_id: int, key: str) -> None:
+    c.execute(
+        "INSERT INTO horarios.participaciones (actividad_id, person_key, creada) "
+        "VALUES (?, ?, ?) ON CONFLICT (actividad_id, person_key) DO NOTHING",
+        (actividad_id, key, now()),
+    )
+
+
+def quitar_participacion(c: Conn, actividad_id: int, key: str) -> int:
+    return c.execute(
+        "DELETE FROM horarios.participaciones WHERE actividad_id = ? AND person_key = ?",
+        (actividad_id, key),
+    )
+
+
+def participantes(c: Conn, actividad_id: int) -> list[str]:
+    return [r["person_key"] for r in c.query(
+        "SELECT person_key FROM horarios.participaciones WHERE actividad_id = ? ORDER BY creada",
+        (actividad_id,),
+    )]
+
+
+def participantes_de_la_anterior(c: Conn, group_id: int, modo: str, actividad_id: int) -> list[str]:
+    """Claves de quien salió en la actividad anterior del mismo modo.
+
+    Es la regla de los activos: quien acaban de participar descansa la siguiente.
+    La anterior del mismo modo, no la anterior a secas, para que una venta de la
+    mañana no quite de la ruleta a la charla de la tarde.
+    """
+    prev = c.query(
+        "SELECT id FROM horarios.actividades WHERE group_id = ? AND modo = ? AND id <> ? "
+        "ORDER BY creada DESC, id DESC LIMIT 1",
+        (group_id, modo, actividad_id),
+    )
+    return participantes(c, prev[0]["id"]) if prev else []
+
+
+def participaciones_por_persona(c: Conn, group_id: int) -> dict[str, dict]:
+    """Cuántas veces salió cada uno, con el reparto entre ventas y actividades con hora.
+
+    Sale separado porque no es lo mismo haber cubuelto cinco ventas que haber
+    hablado en cinco charlas: el «más activos» se lee mejor así.
+    """
+    filas = c.query(
+        "SELECT p.person_key, a.modo, COUNT(*) AS n FROM horarios.participaciones p "
+        "JOIN horarios.actividades a ON a.id = p.actividad_id "
+        "WHERE a.group_id = ? GROUP BY p.person_key, a.modo",
+        (group_id,),
+    )
+    cuenta: dict[str, dict] = {}
+    for f in filas:
+        fila = cuenta.setdefault(f["person_key"], {"total": 0, "ventas": 0, "horario": 0})
+        fila["total"] += f["n"]
+        fila[f["modo"]] += f["n"]
+    return cuenta
+
+
+
+def strikes_de(c: Conn, group_id: int) -> list[dict]:
+    return c.query(
+        "SELECT person_key, veces, detalle, actualizado FROM horarios.strikes "
+        "WHERE group_id = ? ORDER BY veces DESC, person_key",
+        (group_id,),
+    )
+
+
+def mover_strike(c: Conn, group_id: int, key: str, delta: int, detalle: str = "") -> int:
+    """Suma o quita strikes y devuelve el total resultante. Nunca baja de cero."""
+    rows = c.query(
+        "SELECT veces FROM horarios.strikes WHERE group_id = ? AND person_key = ?",
+        (group_id, key),
+    )
+    total = max(0, (rows[0]["veces"] if rows else 0) + delta)
+    if rows:
+        c.execute(
+            "UPDATE horarios.strikes SET veces = ?, detalle = ?, actualizado = ? "
+            "WHERE group_id = ? AND person_key = ?",
+            (total, detalle if detalle else "", now(), group_id, key),
+        )
+    else:
+        c.execute(
+            "INSERT INTO horarios.strikes (group_id, person_key, veces, detalle, actualizado) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (group_id, key, total, detalle, now()),
+        )
+    return total
+

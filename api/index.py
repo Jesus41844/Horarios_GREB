@@ -7,10 +7,10 @@ sys.path.insert(0, str(ROOT))
 from fastapi import APIRouter, FastAPI  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-from lib.routes import auth, data, groups, setup  # noqa: E402
+from lib.routes import actividades, auth, data, groups, setup  # noqa: E402
 
 api = APIRouter(prefix="/api")
-for module in (auth, setup, groups, data):
+for module in (auth, setup, groups, data, actividades):
     api.include_router(module.router)
 
 app = FastAPI(title="Horarios", docs_url=None, redoc_url=None, openapi_url=None)

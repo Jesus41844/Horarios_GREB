@@ -9,7 +9,7 @@ from .. import repo
 from ..db import Conn
 from ..deps import Access, get_conn, group_access, group_admin
 from ..parser import ParseError, es_virtual, norm, parse_pdf, person_from_filename
-from ..schedule import build_week, merge_ranges
+from ..schedule import build_week, free_windows, merge_ranges
 
 router = APIRouter(prefix="/g/{slug}", tags=["horarios"])
 
@@ -31,7 +31,13 @@ class BlocksIn(BaseModel):
     replace_kind: str | None = None   # borra antes los bloques de ese tipo
 
 
-def _minutes(hhmm: str) -> int:
+class RenameIn(BaseModel):
+    name: str
+    new_name: str
+
+
+def minutos_de(hhmm: str) -> int:
+    """"14:30" son las 870. Falla con un 400 si la hora no existe."""
     try:
         h, m = (int(x) for x in hhmm.split(":"))
     except ValueError:
@@ -134,7 +140,7 @@ def add_blocks(body: BlocksIn, access: Access = Depends(group_admin), c: Conn = 
             raise HTTPException(400, f"Tipo no válido: «{b.kind}».")
         if not 0 <= b.day <= 6:
             raise HTTPException(400, "Día no válido.")
-        start, end = _minutes(b.start), _minutes(b.end)
+        start, end = minutos_de(b.start), minutos_de(b.end)
         if start >= end:
             raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
         if b.kind == "clase" and es_virtual(b.room):
@@ -166,7 +172,7 @@ def update_block(block_id: int, name: str, body: BlockIn,
         raise HTTPException(400, f"Tipo no válido: «{body.kind}».")
     if not 0 <= body.day <= 6:
         raise HTTPException(400, "Día no válido.")
-    start, end = _minutes(body.start), _minutes(body.end)
+    start, end = minutos_de(body.start), minutos_de(body.end)
     if start >= end:
         raise HTTPException(400, "La hora de salida tiene que ser posterior a la de entrada.")
 
@@ -205,3 +211,61 @@ def delete_person(name: str, access: Access = Depends(group_admin), c: Conn = De
         raise HTTPException(404, "Persona no encontrada")
     c.commit()
     return {"deleted": name}
+
+
+@router.put("/person")
+def rename_person(body: RenameIn, access: Access = Depends(group_admin), c: Conn = Depends(get_conn)):
+    """Corrige el nombre con que se subió el PDF.
+
+    El nombre es la clave de todo lo demás: la búsqueda lo ignora mayúsculas y
+    tildes, y de él dependen los bloques, las participaciones y las strikes. Por
+    eso el cambio se comprueba antes de tocar nada, y se arrastra lo social.
+    """
+    nuevo = body.new_name.strip()
+    if not nuevo:
+        raise HTTPException(400, "El nombre no puede quedar vacío.")
+    # Solo una tilde o un nombre en minúsculas no cambian la clave: se puede
+    # guardar sin más, porque no puede chocar con nadie (es la misma persona).
+    mismo = norm(nuevo) == norm(body.name)
+    if not mismo and repo.person_id(c, access.group["id"], nuevo):
+        raise HTTPException(409, f"Ya hay otra persona llamada «{nuevo}» en la agrupación.")
+    if not repo.renombrar_persona(c, access.group["id"], body.name, nuevo):
+        raise HTTPException(404, "Esa persona no está en la agrupación.")
+    c.commit()
+    return {"name": nuevo, "renamed": True}
+
+
+@router.get("/libre")
+def buscar_libres(
+    dias: str = "0,1,2,3,4",     # 0 = lunes ... 6 = domingo
+    desde: str = "07:00",        # franja del día que se mira
+    hasta: str = "22:00",
+    duracion: int = 60,          # cuánto tiene que durar el hueco, en minutos
+    paso: int = 15,              # cada cuánto se prueba a empezar el hueco
+    access: Access = Depends(group_access), c: Conn = Depends(get_conn),
+):
+    """Los tramos en los que está libre más gente, ordenados de mejor a peor.
+
+    Es la pregunta al revés de la rejilla: no quién está ocupado, sino cuándo se
+    puede convocar a la gente. La franja del día, cuánto tiene que durar el hueco
+    y cada cuánto se prueban los huecos los decide quien pregunta, así que sirve
+    para una reunión de media hora como para un stand de toda la tarde.
+    """
+    try:
+        elegidos = sorted({int(x) for x in dias.split(",") if x.strip() != ""})
+    except ValueError:
+        raise HTTPException(400, "Los días se escriben como 0,1,2 (0 = lunes, 6 = domingo).")
+    if not elegidos or any(d not in range(7) for d in elegidos):
+        raise HTTPException(400, "Días no válidos.")
+    ini, fin = minutos_de(desde), minutos_de(hasta)
+    if ini >= fin:
+        raise HTTPException(400, "La franja tiene que empezar antes de terminar.")
+    if not 5 <= duracion <= 24 * 60:
+        raise HTTPException(400, "El hueco tiene que durar entre 5 minutos y 24 horas.")
+    if not 1 <= paso <= duracion:
+        raise HTTPException(400, "Cada cuánto se prueba a empezar el hueco no tiene sentido así.")
+    return free_windows(
+        repo.all_blocks(c, access.group["id"]),
+        [p["name"] for p in repo.list_people(c, access.group["id"])],
+        elegidos, ini, fin, duracion, paso,
+    )

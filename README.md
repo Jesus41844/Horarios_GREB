@@ -33,6 +33,21 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Ficha por persona**, con su semana completa, materia, aula y marcas de laboratorio o grupo.
 - **Búsqueda por nombre**, insensible a tildes y mayúsculas.
 - Los bloques consecutivos de una misma persona se unen cuando la pausa es de 10 minutos o menos.
+- **Ajustes en columna**: las secciones a la izquierda y, al pie, la cuenta con el botón de salir.
+
+**Cuándo hay más gente libre**
+
+La pregunta al revés de la rejilla. En lugar de quién está ocupado, la vista **Cuándo** recorre la
+franja elegida de *paso* en *paso* minutos, cuenta cuánta gente está libre en cada ventana de la
+duración pedida y devuelve los tramos con más gente libre a la vez, de mejor a peor:
+
+- Días, franja del día, duración del hueco (de 5 minutos a 24 horas) y cada cuánto se prueban los
+  huecos los decide quien pregunta.
+- Los tramos contiguos con el mismo mejor resultado se unen en uno solo: si A, B y C están libres en
+  cada ventana, lo están en todo el hueco que las cubre.
+- Cada tramo dice **quién se queda fuera** en el tramo entero, que es justo lo que hay que saber
+  antes de escribir la convocatoria.
+- Quien no tiene ningún bloque cuenta como libre siempre, y entra en el cómputo.
 
 **Carga de horarios**
 
@@ -46,9 +61,31 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Clases virtuales excluidas**: las que no ocupan físicamente a nadie no cuentan como tiempo
   ocupado (véase [Limitaciones conocidas](#limitaciones-conocidas)).
 
+**Ruleta de actividades**
+
+Para repartir turnos y ponencias sin que siempre salga la misma cara. Cada actividad guarda su propio
+conteo, y son dos clases de actividad:
+
+| Modo | Qué mira al sortear |
+|---|---|
+| **Venta** | El padrón entero, sin mirar el horario: es gente que está ahí todo el día |
+| **Hora fija** | Solo quien esté libre ese día en esa franja, como en el resto de la aplicación |
+
+- **Strikes**: botones rápidos de `+1` y `−1` por persona, con un motivo opcional. El peso en la
+  sorteo es `1 + 1,5 × strikes`, así que quien más tiene, más urge que salga.
+- **Descanso**: quien salió en la actividad anterior del mismo modo no entra en la siguiente. Se puede
+  desactivar por sorteo (`excluir_activos: false`) cuando de verdad haga falta.
+- Sorteo **sin reemplazo**, de 1 a 6 personas, con el resultado siempre en el servidor.
+- **Corrección manual**: quien no llegó, o a quien se le olvidó apuntar, se quita con un clic, y el
+  conteo se ajusta solo.
+- **Más activos**: clasificación de quién más ha salido, con el reparto entre ventas y actividades con
+  hora por separado. La ve todo el mundo de la agrupación; la ruleta, solo quien administra.
+
 **Administración**
 
 - Cuentas propias, agrupaciones aisladas y flujo de solicitud de acceso con aprobación.
+- **Corrección de nombres** del padrón, tal y como sale en el PDF. Las participaciones y las strikes
+  están detrás de la persona, no del texto, así que sobreviven al cambio.
 - Gestión de miembros restringida a la cuenta principal de cada agrupación.
 - Alta inicial desde la propia web, sin acceso a la base de datos.
 
@@ -110,13 +147,14 @@ flowchart LR
 api/index.py         Punto de entrada de la función Python
 lib/
   parser.py          Lectura de la tabla del PDF y regla de clases virtuales
-  schedule.py        Unión de bloques y cálculo de tramos por día
+  schedule.py        Unión de bloques, tramos por día y búsqueda de huecos libres
+  ruleta.py          Pesos, quién está disponible y el sorteo en sí
   repo.py            Todas las consultas SQL
   db.py              Conexión: Postgres si hay DATABASE_URL, SQLite si no
   security.py        Contraseñas (scrypt) y tokens de sesión
   deps.py            Dependencias de FastAPI: sesión y permisos por agrupación
   fixes.py           Correcciones de datos de una sola aplicación
-  routes/            auth · setup · groups · data
+  routes/            auth · setup · groups · data · actividades
 public/
   index.html         Documento de entrada
   css/app.css        Estilos
@@ -205,9 +243,18 @@ Todo vive en el esquema `horarios`.
 | `requests` | Solicitudes de acceso pendientes de aprobación |
 | `people` | Personas cuyo horario se gestiona, por agrupación |
 | `blocks` | Bloques de horario; `kind` distingue `clase` de `trabajo` |
+| `actividades` | Actividades de la ruleta: nombre, modo (`ventas` / `horario`), día y hora, cuántas salen |
+| `participaciones` | Quién salió en cada actividad; enlaza con `person_key`, no con el nombre |
+| `strikes` | Strikes por persona y agrupación, con su motivo y fecha |
 | `applied_migrations` | Correcciones de datos ya aplicadas |
 
-Al eliminar una agrupación se eliminan en cascada sus personas y bloques.
+Al eliminar una agrupación se eliminan en cascada sus personas, bloques, actividades y strikes.
+
+**Identidad social.** `people.name` es la clave de la agenda, pero cambiarla de verdad (por ejemplo,
+«Pérez, Ana» → «Ana Gómez») no puede perder participaciones ni strikes. Por eso ambas tablas
+sociales guardan un `person_key` propio —el nombre normalizado, sin tildes ni mayúsculas— que se
+mueve con el renombrado. Sobrevive también a que alguien vuelva a subir su PDF, porque el alta
+conserva la clave que ya tenía.
 
 ## API
 
@@ -224,6 +271,13 @@ Todas las rutas cuelgan de `/api`. Salvo las marcadas como públicas, exigen ses
 | `GET /requests` · `POST /requests/{id}/approve` · `DELETE /requests/{id}` | Superadmin | Solicitudes |
 | `GET /g/{slug}/members` · `PUT` · `DELETE …/{user_id}` | Cuenta principal | Gestión de personas |
 | `GET /g/{slug}/schedule` · `/people` · `/person` | Miembro | Consulta |
+| `GET /g/{slug}/libre` | Miembro | Tramos con más gente libre |
+| `GET /g/{slug}/ruleta` | Miembro | Padrón con strikes y participaciones, y actividades |
+| `PUT /g/{slug}/person` | Administrador | Corregir el nombre del padrón |
+| `POST /g/{slug}/actividades` · `DELETE /g/{slug}/actividad/{id}` | Administrador | Alta y borrado de actividades |
+| `POST /g/{slug}/actividad/{id}/girar` | Administrador | Sortear, en el servidor |
+| `POST /g/{slug}/actividad/{id}/participacion` | Administrador | Corregir el reparto a mano |
+| `PUT /g/{slug}/strike` | Administrador | Sumar o quitar una strike |
 | `POST /g/{slug}/upload` | Administrador | Subir PDF |
 | `POST /g/{slug}/blocks` · `PUT` · `DELETE /g/{slug}/block/{id}` | Administrador | Bloques manuales |
 | `DELETE /g/{slug}/person` · `DELETE /g/{slug}/people` | Administrador | Borrar horarios |
@@ -250,7 +304,9 @@ node tests/ocr.test.mjs                     # analizador del OCR
 
 Las pruebas de API usan SQLite y cubren, entre otros aspectos: permisos por rol, aislamiento entre
 agrupaciones, bloqueo por intentos fallidos, flujo de solicitud y aprobación, edición de bloques,
-exclusión de clases virtuales y correcciones de datos.
+exclusión de clases virtuales, correcciones de datos, búsqueda de huecos libres, renombrado con
+arrastre de participaciones y strikes, y la ruleta completa (modos, descanso, pesos, correcciones y
+aislamiento entre agrupaciones).
 
 > **Nota.** Varias pruebas cargan un horario de ejemplo llamado `HorarioClase.pdf` en la raíz del
 > proyecto. El archivo no se versiona, porque `*.pdf` está excluido para no publicar horarios

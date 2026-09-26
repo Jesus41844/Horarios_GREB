@@ -14,13 +14,21 @@ const S = {
   slug: null,
   week: [],
   roster: [],
-  view: "semana",   // "semana" (rejilla L-V) o "dia"
+  view: "semana",   // "semana" (rejilla L-V), "dia", "cuando", "activos" o "ruleta"
   day: todayIndex(),
   query: "",
   report: null,
   flash: null,    // aviso que debe sobrevivir a un redibujado del panel
   pending: 0,     // solicitudes por aprobar (solo superadmin)
   waiting: null,  // agrupaciones que esta cuenta pidió y aún no le aprueban
+  cuando: {       // lo que se ha pedido en la vista "Cuándo"
+    dias: [0, 1, 2, 3, 4], desde: "07:00", hasta: "22:00",
+    duracion: 60, paso: 15, resultados: null, cargando: false, error: null,
+  },
+  ruleta: null,   // datos de /ruleta: padrón, strikes y participaciones
+  ruletaError: null,
+  girando: null,  // id de la actividad que se está girando ahora
+  ultimo: null,   // último sorteo, para enseñarlo debajo de la actividad
 };
 
 const group = () => S.groups.find((g) => g.slug === S.slug) || null;
@@ -198,13 +206,20 @@ async function load() {
 function render(error) {
   clear(root).append(header(), el("main", { className: "wrap" }, ...body(error)));
   requestAnimationFrame(ajustarRejilla);
+  // Ni se pide dos veces ni se reintenta eternamente cuando ya ha fallado: si el
+  // servidor dice que no, repetirlo solo daría un bucle de recargados.
+  if (["ruleta", "activos"].includes(S.view) && S.slug && !S.ruleta && !S.ruletaError) cargarRuleta();
 }
 
 function header() {
   const picker = S.groups.length > 1
     ? el("select", {
       ariaLabel: "Agrupación",
-      onchange: (e) => { S.slug = e.target.value; remember(S.slug); S.report = null; load(); },
+      onchange: (e) => {
+        S.slug = e.target.value; remember(S.slug); S.report = null;
+        S.ruleta = null; S.ruletaError = null; ruletaPeticion = null;
+        load();
+      },
     }, ...S.groups.map((g) => el("option", { value: g.slug, textContent: g.name, selected: g.slug === S.slug })))
     : el("strong", { textContent: group()?.name || "" });
 
@@ -228,11 +243,7 @@ function header() {
       el("button", {
         className: "btn", type: "button",
         onclick: () => openSettings(S.pending ? "solicitudes" : "cuenta"),
-      }, "Ajustes", S.pending ? el("span", { className: "badge", textContent: String(S.pending) }) : null),
-      el("button", {
-        className: "btn", type: "button", textContent: "Salir",
-        onclick: async () => { await api.logout(); showLogin(); },
-      })));
+      }, "Ajustes", S.pending ? el("span", { className: "badge", textContent: String(S.pending) }) : null)));
 }
 
 function body(error) {
@@ -274,6 +285,18 @@ function body(error) {
     out.push(weekGrid());
     return out;
   }
+  if (S.view === "cuando") {
+    out.push(viewCuando());
+    return out;
+  }
+  if (S.view === "activos") {
+    out.push(viewActivos());
+    return out;
+  }
+  if (S.view === "ruleta") {
+    out.push(viewRuleta());
+    return out;
+  }
 
   out.push(dayTabs());
   const segments = S.week[S.day]?.segments || [];
@@ -288,13 +311,371 @@ function body(error) {
 }
 
 function viewBar() {
+  const tabs = [["semana", "Semana"], ["dia", "Por día"], ["cuando", "Cuándo"], ["activos", "Más activos"]];
+  if (isAdmin()) tabs.push(["ruleta", "Ruleta"]);
   return el("div", { className: "viewbar", role: "tablist", ariaLabel: "Vista" },
-    ...[["semana", "Semana"], ["dia", "Por día"]].map(([id, label]) =>
+    ...tabs.map(([id, label]) =>
       el("button", {
         type: "button", role: "tab", textContent: label,
         ariaSelected: String(S.view === id),
-        onclick: () => { S.view = id; render(); },
+        onclick: () => { S.view = id; S.ultimo = null; render(); },
       })));
+}
+
+// --- cuándo hay más gente libre --------------------------------------------
+
+const DURACIONES = [[30, "30 min"], [45, "45 min"], [60, "1 h"], [90, "1 h 30"], [120, "2 h"], [180, "3 h"]];
+const PASOS = [[5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"]];
+
+/** "Cuándo": la pregunta al revés de la rejilla. Busca los huecos donde más
+ *  gente de la agrupación está libre a la vez, y dice quién se queda fuera. */
+function viewCuando() {
+  const q = S.cuando;
+  const out = [];
+
+  const marcar = (d) => {
+    q.dias = q.dias.includes(d) ? q.dias.filter((x) => x !== d) : [...q.dias, d];
+    render();
+  };
+  const num = (clave, opciones) => el("select", {
+    ariaLabel: clave,
+    onchange: (e) => { q[clave] = Number(e.target.value); },
+  }, ...opciones.map(([v, t]) => el("option", { value: String(v), textContent: t, selected: q[clave] === v })));
+
+  out.push(el("form", {
+    className: "card panel-form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      if (!q.dias.length) { q.error = "Elige al menos un día."; return render(); }
+      q.cargando = true; q.error = null; render();
+      try {
+        q.resultados = await api.libres(S.slug, {
+          dias: q.dias.join(","), desde: q.desde, hasta: q.hasta,
+          duracion: q.duracion, paso: q.paso,
+        });
+      } catch (err) {
+        q.error = err.message; q.resultados = null;
+      }
+      q.cargando = false;
+      render();
+    },
+  },
+    el("div", { className: "campo" },
+      el("span", { className: "rot", textContent: "Días" }),
+      el("div", { className: "chips" }, ...DAYS.map((d, n) => el("button", {
+        type: "button", className: `chip${q.dias.includes(n) ? " on" : ""}`,
+        textContent: d.slice(0, 3), ariaPressed: String(q.dias.includes(n)),
+        ariaLabel: d, onclick: () => marcar(n),
+      })))),
+    el("div", { className: "campo" },
+      el("span", { className: "rot", textContent: "Franja del día" }),
+      el("div", { className: "linea" },
+        el("input", {
+          type: "time", value: q.desde, ariaLabel: "Desde",
+          onchange: (e) => { q.desde = e.target.value; },
+        }),
+        el("span", { textContent: "a" }),
+        el("input", {
+          type: "time", value: q.hasta, ariaLabel: "Hasta",
+          onchange: (e) => { q.hasta = e.target.value; },
+        }))),
+    el("div", { className: "campo" },
+      el("span", { className: "rot", textContent: "Hueco de" }),
+      el("div", { className: "linea" }, num("duracion", DURACIONES), "libres cada", num("paso", PASOS))),
+    el("button", {
+      className: "btn btn-primary", type: "submit",
+      textContent: q.cargando ? "Buscando…" : "Buscar huecos",
+    })));
+
+  if (q.error) out.push(el("div", { className: "note err", textContent: q.error }));
+  if (q.cargando) return out;
+
+  if (q.resultados === null) {
+    out.push(el("p", { className: "hint", textContent:
+      "Elige los días, la franja y cuánto tiene que durar el hueco. Salen primero los tramos con más gente libre." }));
+    return out;
+  }
+  if (!q.resultados.length) {
+    out.push(el("div", { className: "empty" },
+      el("strong", { textContent: "No hay ningún hueco con esa duración" }),
+      `En la franja pedida nadie se libra ${q.duracion} minutos seguidos. Prueba con menos minutos o con más días.`));
+    return out;
+  }
+
+  out.push(el("p", { className: "hint", textContent:
+    `${q.resultados.length} ${q.resultados.length === 1 ? "tramo" : "tramos"}, de mejor a peor.` }));
+  out.push(...q.resultados.slice(0, 25).map((h) => {
+    const libres = h.total - h.ocupados.length;
+    return el("section", { className: "card hueco" },
+      el("div", { className: "hueco-cab" },
+        el("b", { textContent: `${DAYS[h.day]} ${fmtRange(h.start, h.end)}` }),
+        el("span", { className: "hueco-n", textContent: `${libres} de ${h.total} libres` })),
+      el("div", { className: "chips" },
+        ...h.ocupados.map((n) => el("span", { className: "chip fuera", textContent: n })),
+        h.ocupados.length ? null : el("span", { className: "chip ok", textContent: "Todo el padrón libre" })));
+  }));
+  return out;
+}
+
+// --- más activos ------------------------------------------------------------
+
+/** Quién más ha salido, contando ventas y actividades con hora por separado. */
+function viewActivos() {
+  if (S.ruletaError) return [el("div", { className: "note err", textContent: S.ruletaError })];
+  if (!S.ruleta) return [el("p", { className: "hint", textContent: "Cargando…" })];
+
+  const personas = [...S.ruleta.personas].sort((a, b) =>
+    b.total - a.total || b.ventas - a.ventas || b.horario - a.horario || a.name.localeCompare(b.name, "es"));
+  const conGente = personas.filter((p) => p.total > 0);
+  const total = conGente.reduce((n, p) => n + p.total, 0);
+  const out = [];
+
+  if (!conGente.length) {
+    out.push(el("div", { className: "empty" },
+      el("strong", { textContent: "Todavía nadie ha salido" }),
+      isAdmin() ? "Gira la ruleta desde la pestaña Ruleta y aquí irá saliendo el who's who."
+        : "Cuando empiece a haber actividades, aquí aparecerá quién más ha salido."));
+    return out;
+  }
+
+  out.push(el("p", { className: "hint", textContent:
+    `${total} ${total === 1 ? "salida" : "salidas"} de ${conGente.length} ${conGente.length === 1 ? "persona" : "personas"}.` }));
+  out.push(el("ol", { className: "rank" }, ...conGente.map((p, i) => el("li", { className: "rank-fila" },
+    el("span", { className: "rank-n", textContent: String(i + 1) }),
+    el("span", { className: "rank-who" },
+      el("b", { textContent: p.name }),
+      el("span", { className: "rank-det" },
+        `${p.ventas} ${p.ventas === 1 ? "venta" : "ventas"}`,
+        " · ",
+        `${p.horario} ${p.horario === 1 ? "actividad" : "actividades"}`)),
+    p.strikes ? el("span", { className: "strikes", textContent: `⚑ ${p.strikes}` }) : null,
+    el("b", { className: "rank-t", textContent: String(p.total) })))));
+
+  const sinSalir = personas.filter((p) => !p.total);
+  if (sinSalir.length) {
+    out.push(el("p", { className: "hint", textContent:
+      `Todavía no ha salido: ${sinSalir.map((p) => p.name).join(", ")}.` }));
+  }
+  return out;
+}
+
+// --- ruleta -----------------------------------------------------------------
+
+let ruletaPeticion = null;   // agrupación que se está pidiendo, para no duplicar
+
+async function cargarRuleta({ force = false } = {}) {
+  const slug = S.slug;
+  if (!slug) return;
+  if (force) ruletaPeticion = null;
+  else if (ruletaPeticion === slug) return;
+  ruletaPeticion = slug;
+  try {
+    const datos = await api.ruleta(slug);
+    if (slug !== S.slug) return;         // mientras cargaba, se cambió de agrupación
+    S.ruleta = datos;
+    S.ruletaError = null;
+  } catch (err) {
+    if (slug !== S.slug) return;
+    S.ruleta = null;
+    S.ruletaError = err.message;
+  }
+  render();
+}
+
+function viewRuleta() {
+  if (!isAdmin()) {
+    return [el("div", { className: "empty" },
+      el("strong", { textContent: "La ruleta es de quienes administran" }),
+      "Se puede mirar el who's who en Más activos.")];
+  }
+  if (S.ruletaError) return [el("div", { className: "note err", textContent: S.ruletaError })];
+  if (!S.ruleta) return [el("p", { className: "hint", textContent: "Cargando…" })];
+
+  return [nuevaActividad(), ...S.ruleta.actividades.map((a) => tarjetaActividad(a)), padronStrikes()];
+}
+
+/** Formulario de alta: una venta (todo el día, sin mirar el horario) o una
+ *  actividad con día y hora, que solo sale en el padrón libre en esa franja. */
+function nuevaActividad() {
+  const c = { nombre: "", modo: "ventas", dia: todayIndex(), inicio: "18:00", fin: "20:00", cuantas: 1 };
+  const aviso = el("div");
+
+  const conHora = () => el("div", { className: "linea wrap" },
+    el("select", {
+      ariaLabel: "Día",
+      onchange: (e) => { c.dia = Number(e.target.value); },
+    }, ...DAYS.map((d, n) => el("option", { value: String(n), textContent: d, selected: n === c.dia }))),
+    el("input", {
+      type: "time", value: c.inicio, ariaLabel: "Empieza",
+      onchange: (e) => { c.inicio = e.target.value; },
+    }),
+    el("span", { textContent: "a" }),
+    el("input", {
+      type: "time", value: c.fin, ariaLabel: "Acaba",
+      onchange: (e) => { c.fin = e.target.value; },
+    }));
+
+  const tipo = el("select", {
+    ariaLabel: "Tipo de actividad",
+    onchange: (e) => { c.modo = e.target.value; render(); },
+  },
+    el("option", { value: "ventas", textContent: "Venta (todo el día)", selected: c.modo === "ventas" }),
+    el("option", { value: "horario", textContent: "Actividad con hora fija", selected: c.modo === "horario" }));
+
+  return el("form", {
+    className: "card panel-form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const envio = {
+        nombre: c.nombre.trim(), modo: c.modo, cuantas: c.cuantas,
+        dia: c.dia, inicio: c.inicio, fin: c.fin,
+      };
+      try {
+        await api.crearActividad(S.slug, envio);
+        S.ultimo = null;
+        await cargarRuleta({ force: true });
+      } catch (err) {
+        clear(aviso).append(el("div", { className: "note err", textContent: err.message }));
+      }
+    },
+  },
+    el("h2", { textContent: "Nueva actividad" }),
+    el("div", { className: "campo" },
+      el("span", { className: "rot", textContent: "Cómo es" }), tipo),
+    el("div", { className: "campo" },
+      el("span", { className: "rot", textContent: "Nombre" }),
+      el("input", {
+        type: "text", placeholder: "Venta del viernes", ariaLabel: "Nombre de la actividad", required: true,
+        oninput: (e) => { c.nombre = e.target.value; },
+      })),
+    c.modo === "horario"
+      ? el("div", { className: "campo" },
+        el("span", { className: "rot", textContent: "Cuándo" }), conHora())
+      : null,
+    el("div", { className: "campo" },
+      el("span", { className: "rot", textContent: "Cuántas" }),
+      el("input", {
+        type: "number", min: "1", max: "6", value: "1", ariaLabel: "Cuántas personas",
+        oninput: (e) => { c.cuantas = Number(e.target.value); },
+      })),
+    aviso,
+    el("button", { className: "btn btn-primary", type: "submit", textContent: "Crear" }));
+}
+
+function tarjetaActividad(a) {
+  const participo = (name, participa) => api.participacion(S.slug, a.id, name, participa)
+    .then(() => { S.ultimo = null; return cargarRuleta({ force: true }); })
+    .catch((err) => alert(err.message));
+
+  return el("section", { className: "card act" },
+    el("div", { className: "act-cab" },
+      el("b", { textContent: a.nombre }),
+      el("span", { className: "tag", textContent: a.modo === "ventas" ? "todo el día" : fmtRange(a.inicio, a.fin) }),
+      a.modo === "horario" ? el("span", { className: "tag", textContent: DAYS[a.dia] }) : null,
+      el("span", { className: "spacer" }),
+      el("button", {
+        className: "btn btn-primary", type: "button",
+        textContent: S.girando === a.id ? "Girando…" : "Girar",
+        disabled: S.girando != null,
+        onclick: () => girar(a),
+      }),
+      el("button", {
+        className: "btn btn-danger", type: "button", textContent: "×",
+        ariaLabel: `Eliminar ${a.nombre}`,
+        onclick: async () => {
+          if (!confirm(`¿Eliminar «${a.nombre}» y su conteo?`)) return;
+          await api.borrarActividad(S.slug, a.id);
+          S.ultimo = null;
+          cargarRuleta({ force: true });
+        },
+      })),
+    a.participantes.length
+      ? el("div", { className: "chips" }, ...a.participantes.map((n) => el("span", { className: "chip on" },
+        n,
+        el("button", {
+          type: "button", className: "x", textContent: "×", ariaLabel: `Quitar a ${n}`,
+          onclick: () => participo(n, false),
+        }))))
+      : el("p", { className: "hint", textContent: "Todavía no ha salido nadie." }),
+    S.ultimo?.id === a.id ? resultadoSorteo(S.ultimo) : null);
+}
+
+/** Al girar sale el reparto. Con movimiento se ve la cinta de nombres correr; sin
+ *  movimiento (o si el sistema lo pide así) va directo al resultado. */
+async function girar(a) {
+  S.girando = a.id;
+  S.ultimo = null;
+  render();
+  const cinta = document.querySelector(".tira");
+  let t;
+  const parar = () => { if (t) clearInterval(t); };
+  if (cinta && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const nombres = S.ruleta.personas.map((p) => p.name);
+    let i = 0;
+    t = setInterval(() => {
+      i = (i + 1) % nombres.length;
+      cinta.textContent = nombres[i];
+    }, 70);
+  }
+  try {
+    const r = await api.girar(S.slug, a.id, { cuantas: 1 });
+    parar();
+    S.ultimo = { id: a.id, ...r };
+  } catch (err) {
+    parar();
+    alert(err.message);
+  }
+  S.girando = null;
+  render();
+}
+
+function resultadoSorteo(r) {
+  return el("div", { className: "sorteo" },
+    el("div", { className: "tira", textContent: r.elegidos.map((e) => e.name).join("  ·  ") || "—" }),
+    r.elegidos.length
+      ? el("p", { className: "sorteo-out", textContent: `Sale ${r.elegidos.length === 1 ? "nadie más que" : ""} ${r.elegidos.map((e) => e.name).join(", ")}.` })
+      : el("p", { className: "sorteo-out", textContent: "No ha salido nadie." }),
+    r.descansan?.length
+      ? el("p", { className: "hint", textContent: `Descansan: ${r.descansan.join(", ")}.` })
+      : null,
+    r.ocupados?.length
+      ? el("p", { className: "hint", textContent: `Con el turno no pueden: ${r.ocupados.join(", ")}.` })
+      : null,
+    el("button", {
+      className: "btn", type: "button", textContent: " Girar otra vez",
+      onclick: () => girar(S.ruleta.actividades.find((a) => a.id === r.id)),
+    }));
+}
+
+/** El padrón con las strikes: el +1 y el −1 de cada uno, que es lo único que se
+ *  toca a mano. Quien más tiene, más peso sale. */
+function padronStrikes() {
+  return el("section", { className: "card" },
+    el("h2", { textContent: "Strikes" }),
+    el("p", { className: "hint", textContent: "Cada strike pesa más en la ruleta. Van a cero por sí solas cuando alguien sale." }),
+    el("ul", { className: "rows" }, ...S.ruleta.personas.map((p) => el("li", {},
+      el("span", { className: "who-n" },
+        el("b", { textContent: p.name }),
+        el("span", { textContent: p.total ? `${p.total} salidas · peso ${p.peso}` : `peso ${p.peso}` }),
+        p.detalle ? el("span", { className: "room", textContent: p.detalle }) : null),
+      el("button", {
+        className: "btn", type: "button", textContent: "−", ariaLabel: `Quitar una strike a ${p.name}`,
+        disabled: !p.strikes,
+        onclick: async () => {
+          await api.strike(S.slug, p.name, -1).catch((e) => alert(e.message));
+          cargarRuleta({ force: true });
+        },
+      }),
+      el("b", { className: "strike-n", textContent: String(p.strikes) }),
+      el("button", {
+        className: "btn", type: "button", textContent: "+", ariaLabel: `Poner una strike a ${p.name}`,
+        onclick: async () => {
+          const detalle = S.girando ? "" : (prompt(`¿Por qué? (opcional)`, p.detalle || "") ?? "");
+          if (detalle === null) return;
+          await api.strike(S.slug, p.name, 1, detalle).catch((e) => alert(e.message));
+          cargarRuleta({ force: true });
+        },
+      })))));
 }
 
 /** Rejilla semanal de lunes a viernes, como la tabla del horario impreso. */
@@ -734,6 +1115,7 @@ function reportCard(report) {
 
 function openPanel(...content) {
   // append() convertiría un null o undefined en el texto "null"/"undefined".
+  panel.classList.remove("side-panel");   // los ajustes ensanchan el panel, la ficha no
   clear(panel).append(...content.filter((n) => n != null && n !== false));
   panel.hidden = false;
   requestAnimationFrame(() => { panel.classList.add("on"); scrim.classList.add("on"); });
@@ -820,9 +1202,39 @@ async function openPerson(name) {
 
   openPanel(
     ...panelHead(p.name, resumen),
+    isAdmin() ? renombrarSection(p) : null,
     isAdmin() ? addBlockSection(p) : null,
     ...days,
     remove);
+}
+
+/** Corregir el nombre con el que se subió el PDF. Las participaciones y las
+ *  strikes van detrás de la persona, no del texto, así que sobreviven al cambio. */
+function renombrarSection(p) {
+  const input = el("input", { type: "text", value: p.name, ariaLabel: "Nombre en el padrón" });
+  const aviso = el("div");
+  return el("form", {
+    className: "card panel-form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const nuevo = input.value.trim();
+      if (!nuevo || nuevo === p.name) return;
+      try {
+        await api.renamePerson(S.slug, p.name, nuevo);
+        closePanel();
+        await load();
+        openPerson(nuevo);
+      } catch (err) {
+        clear(aviso).append(el("div", { className: "note err", textContent: err.message }));
+      }
+    },
+  },
+    el("span", { className: "rot", textContent: "Nombre en el padrón" }),
+    el("div", { className: "linea" },
+      input,
+      el("button", { className: "btn btn-primary", type: "submit", textContent: "Guardar" })),
+    el("p", { className: "hint", textContent: "Tal y como sale en el PDF. Al corregirlo se mantienen participaciones y strikes." }),
+    aviso);
 }
 
 /** Convierte una fila del horario en un formulario para corregirla. */
@@ -930,18 +1342,32 @@ function openSettings(tab = "cuenta") {
   }
   if (!tabs.some(([id]) => id === tab)) tab = "cuenta";
 
-  const bar = el("div", { className: "tabs", role: "tablist" },
-    ...tabs.map(([id, label]) => el("button", {
-      type: "button", role: "tab", textContent: label, ariaSelected: String(id === tab),
-      onclick: () => openSettings(id),
-    })));
-
-  const views = {
+  const vistas = {
     cuenta: accountView, horarios: schedulesView, miembros: membersView,
     grupos: groupsView, solicitudes: requestsView,
   };
-  openPanel(...panelHead("Ajustes", S.user.email), bar, el("div", { id: "settings-body" }));
-  views[tab]();
+
+  // Las secciones van en una columna, como el menú de cualquier aplicación, y
+  // abajo la cuenta con el botón de salir: es lo último que se hace, no lo
+  // primero que se pisa por error al ir con el dedo por la parte de arriba.
+  const nav = el("div", { className: "side-nav", role: "tablist", ariaLabel: "Ajustes" },
+    ...tabs.map(([id, label]) => el("button", {
+      type: "button", role: "tab", textContent: label, ariaSelected: String(id === tab),
+      onclick: () => openSettings(id),
+    })),
+    el("div", { className: "side-foot" },
+      el("p", { className: "side-mail", textContent: S.user.email }),
+      el("button", {
+        className: "btn btn-danger", type: "button", textContent: "Salir",
+        onclick: async () => { closePanel(); await api.logout(); showLogin(); },
+      })));
+
+  openPanel(...panelHead("Ajustes"),
+    el("div", { className: "side" },
+      nav,
+      el("div", { className: "side-body", id: "settings-body" })));
+  panel.classList.add("side-panel");
+  vistas[tab]();
 }
 
 function settingsBody() {

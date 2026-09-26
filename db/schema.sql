@@ -78,6 +78,45 @@ create table if not exists horarios.blocks (
 );
 create index if not exists blocks_person_idx on horarios.blocks(person_id);
 
+-- Ruleta de actividades: qué hay que repartir y a quién le tocó.
+-- `modo` distingue las ventas (ocupan todo el día, así que el horario no importa)
+-- de las actividades con hora fija (el horario decide quién puede salir).
+create table if not exists horarios.actividades (
+  id bigint generated always as identity primary key,
+  group_id bigint not null references horarios.groups(id) on delete cascade,
+  nombre text not null,
+  modo text not null check (modo in ('ventas', 'horario')),
+  dia smallint not null default 0,        -- 0 = lunes ... 6 = domingo (modo 'horario')
+  inicio integer not null default 0,      -- minutos desde medianoche
+  fin integer not null default 0,
+  cuantas integer not null default 1,     -- cuántas personas hacen falta
+  creada bigint not null,
+  cerrada integer not null default 0      -- 1 = ya se repartió
+);
+create index if not exists actividades_group_idx on horarios.actividades(group_id);
+
+-- Quién participó en qué. Se guarda la clave del nombre y no el id de la persona
+-- a propósito: al volver a subir un PDF la persona se borra y se recrea con otro
+-- id, y el reparto tiene que sobrevivir a eso.
+create table if not exists horarios.participaciones (
+  actividad_id bigint not null references horarios.actividades(id) on delete cascade,
+  person_key text not null,
+  creada bigint not null,
+  primary key (actividad_id, person_key)
+);
+create index if not exists participaciones_key_idx on horarios.participaciones(person_key);
+
+-- Ausencias sin excusa: subir el peso de salir en la ruleta. Por persona y
+-- agrupación, con la misma clave por el mismo motivo que en participaciones.
+create table if not exists horarios.strikes (
+  group_id bigint not null references horarios.groups(id) on delete cascade,
+  person_key text not null,
+  veces integer not null default 0,
+  detalle text not null default '',
+  actualizado bigint not null,
+  primary key (group_id, person_key)
+);
+
 -- Limpiezas de datos ya aplicadas, para no repetirlas en cada arranque.
 create table if not exists horarios.applied_migrations (
   name text primary key,
@@ -94,4 +133,7 @@ alter table horarios.memberships enable row level security;
 alter table horarios.requests enable row level security;
 alter table horarios.people enable row level security;
 alter table horarios.blocks enable row level security;
+alter table horarios.actividades enable row level security;
+alter table horarios.participaciones enable row level security;
+alter table horarios.strikes enable row level security;
 alter table horarios.applied_migrations enable row level security;

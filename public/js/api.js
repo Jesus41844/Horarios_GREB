@@ -81,4 +81,26 @@ export const api = {
     form.append("files", file);
     return request(`/g/${encodeURIComponent(slug)}/upload`, { method: "POST", body: form });
   },
+
+  renamePerson: (slug, name, newName) =>
+    request(`/g/${encodeURIComponent(slug)}/person`, { method: "PUT", json: { name, new_name: newName } }),
+
+  // "Cuándo": los tramos con más gente libre, para la franja y la duración que se pidan.
+  libres: (slug, q) => {
+    const p = new URLSearchParams(q);
+    return request(`/g/${encodeURIComponent(slug)}/libre?${p}`);
+  },
+
+  ruleta: (slug) => request(`/g/${encodeURIComponent(slug)}/ruleta`),
+  crearActividad: (slug, data) =>
+    request(`/g/${encodeURIComponent(slug)}/actividades`, { method: "POST", json: data }),
+  borrarActividad: (slug, id) =>
+    request(`/g/${encodeURIComponent(slug)}/actividad/${id}`, { method: "DELETE" }),
+  girar: (slug, id, data) =>
+    request(`/g/${encodeURIComponent(slug)}/actividad/${id}/girar`, { method: "POST", json: data }),
+  participacion: (slug, id, name, participa) =>
+    request(`/g/${encodeURIComponent(slug)}/actividad/${id}/participacion`,
+      { method: "POST", json: { name, participa } }),
+  strike: (slug, name, delta, detalle) =>
+    request(`/g/${encodeURIComponent(slug)}/strike`, { method: "PUT", json: { name, delta, detalle } }),
 };

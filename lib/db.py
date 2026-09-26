@@ -20,7 +20,8 @@ MIGRATIONS_FILE = ROOT / "db" / "migrations.sql"
 # de una versión anterior y hay que aplicarlas. Al añadir una migración nueva, se
 # añade aquí su columna.
 _ESPERADAS = [("blocks", "kind"), ("groups", "owner_user_id"),
-              ("applied_migrations", "name")]
+              ("applied_migrations", "name"), ("actividades", "modo"),
+              ("participaciones", "person_key"), ("strikes", "veces")]
 _SENTINEL = (
     "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'horarios' "
     "AND (table_name, column_name) IN (" + ", ".join(["(%s, %s)"] * len(_ESPERADAS)) + ")"

@@ -50,6 +50,17 @@ const dudas = { "aula 3-405": false, "SALON 1-213": false, "AULA: 3-405": false,
                 "aula 3421": true, "AULA: 3422": true, "": false };
 for (const [texto, esperado] of Object.entries(dudas)) eq(aulaDudosa(texto), esperado, `dudosa(${texto})`);
 
+// --- el OCR se come el guion del código: cuatro dígitos se parten solos
+import { normalizarAula } from "../public/js/ocr.js";
+for (const [texto, esperado] of Object.entries({
+  "aula 3-405": "aula 3-405", "AULA: 3-422": "AULA: 3-422", "AULA:3-422": "AULA: 3-422",
+  "AULA:3422": "AULA: 3-422", "aula 3421": "aula 3-421", "AULA: 3422": "AULA: 3-422",
+  "Salon 1234": "Salon 1-234", "aula 3 422": "aula 3-422", "aula 3n03": "aula 3n03",
+  "aula 3-N03": "aula 3-N03", "aula 13422": "aula 13422", "": "" }))
+  eq(normalizarAula(texto), esperado, `normalizarAula(${texto})`);
+// Y una vez normalizado, el código ya no se marca para revisar.
+for (const texto of ["AULA:3422", "aula 3421"]) eq(aulaDudosa(normalizarAula(texto)), false, `dudosa tras normalizar(${texto})`);
+
 // --- el OCR reconoce Salón y deja fuera las virtuales
 import { esVirtual } from "../public/js/ocr.js";
 for (const [t, e] of Object.entries({

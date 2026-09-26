@@ -63,8 +63,10 @@ intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 
 - **PDF**: lectura exacta de la tabla del horario, celda por celda.
 - **Imagen**: reconocimiento óptico (OCR) ejecutado en el navegador. Admite capturas de la tabla
   de la UTP aunque el OCR monte mal los títulos de los días y pierda algún dos puntos de las horas:
-  las columnas se sacan de dónde está cada `AULA:` y los días se numeran por orden. El resultado
-  es una propuesta editable y **nunca se guarda sin revisión**.
+  las columnas se sacan de dónde está cada `AULA:` y los días se numeran por orden. El código
+  del aula también se recompone: si el OCR lee cuatro números seguidos (`AULA:3422`) se vuelve a
+  partir por su cuenta (`3-422`), que es como lo escribe la UTP. El resultado es una propuesta
+  editable y **nunca se guarda sin revisión**.
 - **Entrada manual**: alta, edición y borrado de cualquier bloque, sea cual sea su origen.
 - **Horario laboral**: franjas de trabajo que cuentan como ocupación igual que una clase.
 - **Informe de subida** por archivo, con el nombre exacto y el motivo de cada fallo; un archivo
@@ -346,7 +348,8 @@ aislamiento entre agrupaciones).
   palabras llegan desordenadas y el OCR confunde letras. En una captura real de la UTP leyó las 26
   clases presenciales de 29 (las 3 virtuales se descartan solas) con el día, la hora, la materia y
   el aula correctos, aunque alguna palabra quedó mal (`MATEM.SUPE RING` en vez de `MATEM.SUPER.ING`).
-  Por eso la revisión previa es obligatoria y los códigos de aula con formato dudoso se marcan.
+  Aun así marca para revisar los códigos de aula que no encajan en `3-405` (por ejemplo `aula 3`,
+  donde el OCR partió el código), que es justo lo que hay que mirar antes de guardar.
 - **Clases virtuales.** Se descartan las que tienen la letra **N** donde iría el primer dígito de
   un aula física: `Salón 2-N01` es virtual, `aula 3-405` no. Los números que rodean a la N no
   importan. Se aplica a PDF, imágenes y entrada manual, y también se corrigieron los datos que ya

@@ -28,6 +28,18 @@ const AULA = /(aula|sal[oó]n)\s*:?\s*([\w?-]+)/i;
 const VIRTUAL = /\b\d\s*-\s*N0\d\b/i;
 export const esVirtual = (texto) => VIRTUAL.test(texto || "");
 
+/** Deja el sitio como lo escribe la UTP: «aula 3-405».
+ *
+ * El OCR se come el guion del código y a veces lo junta con la palabra
+ * («AULA:3422»), así que cuatro dígitos se vuelven a partir por su cuenta: el
+ * primer dígito es el piso y los otros tres, el aula. */
+export function normalizarAula(texto) {
+  return (texto || "")
+    .replace(/\s*:\s*/, ": ")
+    .replace(/\bn0/i, "N0")
+    .replace(/\b(\d)\s*-?\s*(\d{3})\b/g, "$1-$2");
+}
+
 /** Un código de aula con la forma esperada: 3-405. */
 export function aulaDudosa(texto) {
   const codigo = (texto || "").replace(/^(aula|sal[oó]n)\s*:?\s*/i, "").trim();
@@ -230,9 +242,9 @@ export function construirBloques(palabras, lineas) {
       start: filas[fi].start,
       end: filas[fi].end,
       subject: materia,
-      // "AULA: 3-422" y "AULA:3-422" son la misma aula: se deja con dos puntos
-      // y un espacio, que es como lo escribe también el lector de PDF.
-      room: aula ? aula[0].replace(/\s*:\s*/, ": ").replace(/\s+/g, " ").replace(/\bn0/i, "N0") : "",
+      // "AULA: 3-422", "AULA:3-422" y "AULA:3422" son la misma aula, y queda
+      // con la forma que usa el lector de PDF: dos puntos, guion y mayúscula.
+      room: aula ? normalizarAula(aula[0].replace(/\s+/g, " ")) : "",
       kind: "clase",
     });
   }

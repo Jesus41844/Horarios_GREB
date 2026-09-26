@@ -22,8 +22,8 @@ const S = {
   pending: 0,     // solicitudes por aprobar (solo superadmin)
   waiting: null,  // agrupaciones que esta cuenta pidió y aún no le aprueban
   libres: {       // lo que se ha pedido en la vista "Libres"
-    dias: [0, 1, 2, 3, 4],
-    duracion: 60, paso: 15, resultados: null, cargando: false, error: null,
+    dias: [0, 1, 2, 3, 4], desde: "12:00", hasta: "13:00",
+    resultados: null, cargando: false, error: null,
   },
   ruleta: null,   // datos de /ruleta: padrón, strikes y participaciones
   ruletaError: null,
@@ -322,13 +322,10 @@ function viewBar() {
 // sidebar de Ajustes, así que se pintan en el panel y no en la página. Sus
 // acciones repintan el panel con repintarAjustes() en lugar de render().
 
-const DURACIONES = [[30, "30 min"], [45, "45 min"], [60, "1 h"], [90, "1 h 30"], [120, "2 h"], [180, "3 h"]];
-const PASOS = [[5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"]];
-
-/** "Libres": la pregunta al revés de la rejilla. Busca los huecos donde más
- *  gente está libre y dice **quién puede venir** en cada uno. No hay franjas que
- *  elegir: se mira el día entero y solo se decide cuánto tiene que durar el
- *  hueco, que es lo único que cambia la pregunta. */
+/** "Libres": la pregunta al revés de la rejilla. Se escribe un intervalo, de
+ *  12:00 a 13:00, y contesta **quién está libre de 12:00 a 13:00** con los
+ *  nombres de esa gente. Sin intervalo no se puede contestar nada, así que es lo
+ *  único que se pregunta aparte de los días. */
 function viewLibres() {
   const q = S.libres;
   const out = [];
@@ -337,10 +334,10 @@ function viewLibres() {
     q.dias = q.dias.includes(d) ? q.dias.filter((x) => x !== d) : [...q.dias, d];
     repintarAjustes();
   };
-  const num = (clave, opciones) => el("select", {
-    ariaLabel: clave,
-    onchange: (e) => { q[clave] = Number(e.target.value); },
-  }, ...opciones.map(([v, t]) => el("option", { value: String(v), textContent: t, selected: q[clave] === v })));
+  const hora = (clave) => el("input", {
+    type: "time", value: q[clave], ariaLabel: clave === "desde" ? "Desde" : "Hasta",
+    onchange: (e) => { q[clave] = e.target.value; },
+  });
 
   out.push(el("form", {
     className: "card panel-form",
@@ -349,9 +346,10 @@ function viewLibres() {
       if (!q.dias.length) { q.error = "Elige al menos un día."; return repintarAjustes(); }
       q.cargando = true; q.error = null; repintarAjustes();
       try {
-        // Sin franja: el servidor barre el día entero y ordena por gente libre.
+        // El intervalo entero: el servidor lo busca tal cual y, si nadie está
+        // libre todo ese rato, se lo parte para decir qué sí se puede.
         q.resultados = await api.libres(S.slug, {
-          dias: q.dias.join(","), duracion: q.duracion, paso: q.paso,
+          dias: q.dias.join(","), desde: q.desde, hasta: q.hasta,
         });
       } catch (err) {
         q.error = err.message; q.resultados = null;
@@ -368,11 +366,13 @@ function viewLibres() {
         ariaLabel: d, onclick: () => marcar(n),
       })))),
     el("div", { className: "campo" },
-      el("span", { className: "rot", textContent: "Hueco de" }),
-      el("div", { className: "linea" }, num("duracion", DURACIONES), "libres cada", num("paso", PASOS))),
+      el("span", { className: "rot", textContent: "De" }),
+      el("div", { className: "linea" }, hora("desde"),
+        el("span", { textContent: "a" }),
+        hora("hasta"))),
     el("button", {
       className: "btn btn-primary", type: "submit",
-      textContent: q.cargando ? "Buscando…" : "Buscar quién está libre",
+      textContent: q.cargando ? "Buscando…" : "Ver quién está libre",
     })));
 
   if (q.error) out.push(el("div", { className: "note err", textContent: q.error }));
@@ -380,18 +380,16 @@ function viewLibres() {
 
   if (q.resultados === null) {
     out.push(el("p", { className: "hint", textContent:
-      "Elige los días y cuánto tiene que durar el hueco. Salen primero los tramos con más gente libre." }));
+      "Elige los días y el intervalo. Salen primero los tramos con más gente libre." }));
     return out;
   }
   if (!q.resultados.length) {
     out.push(el("div", { className: "empty" },
-      el("strong", { textContent: "No hay ningún hueco con esa duración" }),
-      `En los días pedidos nadie se libra ${q.duracion} minutos seguidos. Prueba con menos minutos o con más días.`));
+      el("strong", { textContent: "No hay nadie libre en ese rato" }),
+      `En los días pedidos no se libra nadie de ${q.desde} a ${q.hasta}. Prueba con otro intervalo o con más días.`));
     return out;
   }
 
-  out.push(el("p", { className: "hint", textContent:
-    `${q.resultados.length} ${q.resultados.length === 1 ? "tramo" : "tramos"}, de mejor a peor.` }));
   out.push(...q.resultados.slice(0, 25).map((h) => el("section", { className: "card hueco" },
     el("div", { className: "hueco-cab" },
       el("b", { textContent: `${DAYS[h.day]} ${fmtRange(h.start, h.end)}` }),

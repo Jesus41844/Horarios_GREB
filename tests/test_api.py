@@ -733,19 +733,45 @@ def test_buscar_los_tramos_con_mas_gente_libre(client):
     assert lunes[0]["disponibles"] == ["Ana Gómez", "Juan Pérez", "Luis Soto"]
 
 
-def test_los_tramos_se_buscan_sin_que_nadie_elija_franja(client):
+def test_se_pregunta_un_intervalo_y_contesta_quien_esta_libre(client):
     login(client, "greb@x.com")
     alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
-    alta(client, "greb", "Luis Soto", 0, "07:00", "12:00")
+    alta(client, "greb", "Luis Soto", 0, "12:00", "15:00")
+    alta(client, "greb", "Marta Ruiz", 0, "12:30", "13:30")
 
-    # Sin franja en la petición: se barre el día entero y el mejor hueco llega
-    # hasta donde termina el día que se mira, que es lo que se puede mirar.
-    r = client.get("/api/g/greb/libre", params={"dias": "1", "duracion": 60})
+    # De 12:00 a 13:00 solo Ana se libra el rato entero. Luis entra a las doce y
+    # Marta está dentro a y media, así que los dos se quedan fuera.
+    r = client.get("/api/g/greb/libre", params={
+        "dias": "0", "desde": "12:00", "hasta": "13:00"})
     assert r.status_code == 200
+    h = r.json()[0]
+    assert (h["start"], h["end"], h["libres"], h["total"]) == (720, 780, 1, 3)
+    assert h["disponibles"] == ["Ana Gómez"]
+    assert h["ocupados"] == ["Luis Soto", "Marta Ruiz"]
+
+    # Sin escribir duración, el hueco es el intervalo entero.
+    assert h["minutes"] == 60
+
+
+def test_si_nadie_se_libra_el_rato_entero_se_lo_parte(client):
+    login(client, "greb@x.com")
+    alta(client, "greb", "Ana Gómez", 0, "12:00", "13:00")   # se libra a la una
+    alta(client, "greb", "Luis Soto", 0, "15:30", "18:00")   # se libra hasta las tres y media
+    alta(client, "greb", "Marta Ruiz", 0, "12:00", "14:00")  # se libra a las dos
+
+    # De 12:00 a 16:00 no hay ni un minuto con los tres, y el rato entero menos
+    # aún. Aun así se responde con lo que sí se puede: de dos a tres y media
+    # están los tres, que es lo que se venía a buscar.
+    r = client.get("/api/g/greb/libre", params={
+        "dias": "0", "desde": "12:00", "hasta": "16:00"})
     huecos = r.json()
-    assert (huecos[0]["start"], huecos[0]["end"]) == (7 * 60, 23 * 60)
-    assert huecos[0]["disponibles"] == ["Ana Gómez", "Luis Soto"]
-    assert huecos[0]["ocupados"] == []
+    assert huecos
+    mejor = huecos[0]
+    # Ha salido partido: el tramo no es el intervalo entero de cuatro horas.
+    assert 30 <= mejor["minutes"] < 240
+    assert (mejor["start"], mejor["end"]) == (840, 930)  # 14:00–15:30
+    assert mejor["libres"] == 3
+    assert mejor["disponibles"] == ["Ana Gómez", "Luis Soto", "Marta Ruiz"]
 
 
 def test_el_hueco_se_mide_por_la_duracion_pedida(client):
@@ -773,22 +799,23 @@ def test_el_hueco_se_mide_por_la_duracion_pedida(client):
     assert imposible == []
 
 
-def test_buscar_libres_respeta_la_franja_y_valida(client):
+def test_buscar_libres_respeta_el_intervalo_y_valida(client):
     login(client, "greb@x.com")
     alta(client, "greb", "Ana Gómez", 0, "07:00", "12:00")
     alta(client, "greb", "Juan Pérez", 2, "07:00", "09:00")
 
-    # La franja acota por los dos lados: nadie está libre a las tres de la mañana.
+    # El intervalo acota por los dos lados: nadie está libre a las tres de la mañana.
     assert client.get("/api/g/greb/libre", params={
         "dias": "0", "desde": "03:00", "hasta": "06:00", "duracion": 30}).json()[0]["libres"] == 2
-    # Y por el ancho: el hueco no puede salirse de la franja.
+    # Y por el ancho: el hueco no puede salirse del intervalo.
     r = client.get("/api/g/greb/libre", params={
         "dias": "0", "desde": "07:00", "hasta": "20:00", "duracion": 60}).json()
     assert (r[0]["start"], r[0]["end"]) == (720, 1200)          # 12:00–20:00
 
     for malos in ({"dias": "9"}, {"dias": "lunes"}, {"dias": ""},
                   {"desde": "10:00", "hasta": "09:00"}, {"desde": "mediodía"},
-                  {"duracion": 0}, {"duracion": 5000}, {"paso": 0},
+                  {"desde": "12:00", "hasta": "12:03"},   # menos de 5 minutos
+                  {"duracion": 5000}, {"paso": 0},
                   {"paso": 90, "duracion": 60}):
         assert client.get("/api/g/greb/libre", params=malos).status_code == 400, malos
 

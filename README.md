@@ -39,16 +39,18 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Subir PDF** como botón compacto al final de la barra de vistas, junto a *Semana* y *Por día*.
   Sigue aceptando soltar los archivos encima.
 
-**Cuándo hay más gente libre**
+**Quién está libre**
 
-La pregunta al revés de la rejilla. En lugar de quién está ocupado, la vista **Libres** barre el
-día de *paso* en *paso* minutos, cuenta cuánta gente está libre en cada ventana de la duración
-pedida y devuelve los tramos con más gente libre a la vez, de mejor a peor:
+La pregunta al revés de la rejilla. En lugar de quién está ocupado, la vista **Libres** coge un
+intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 13:00**:
 
-- Solo se pregunta **cuánto tiene que durar el hueco** (de 5 minutos a 24 horas) y cada cuánto se
-  prueban. No hay franjas que elegir: se mira el día entero.
-- Los tramos contiguos con el mismo mejor resultado se unen en uno solo: si A, B y C están libres en
-  cada ventana, lo están en todo el hueco que las cubre.
+- Se elige el intervalo y los días, y nada más. El hueco es el intervalo entero, que es lo que se
+  ha preguntado; el parámetro `duracion` existe por si se quiere partir en trozos más cortos.
+- Si del intervalo entero no se libra nadie, no se responde con un "nada", sino con lo que sí se
+  puede: se parte en huecos de media hora y salen los mejores tramos primero, cada uno con sus
+  propias horas, para que se vea de qué sí se puede.
+- Los tramos contiguos con el mismo resultado se unen en uno solo: si A, B y C están libres en cada
+  ventana, lo están en todo el hueco que las cubre.
 - Cada tramo enseña **quién puede venir** (los nombres libres del tramo entero) y el recuento
   "X de Y libres". Quien no puede se esconde detrás de un "No pueden: N", para no tener que leerlo
   todo: lo que se busca es a quién se convoca.
@@ -291,7 +293,7 @@ Todas las rutas cuelgan de `/api`. Salvo las marcadas como públicas, exigen ses
 | `GET /requests` · `POST /requests/{id}/approve` · `DELETE /requests/{id}` | Superadmin | Solicitudes |
 | `GET /g/{slug}/members` · `PUT` · `DELETE …/{user_id}` | Cuenta principal | Gestión de personas |
 | `GET /g/{slug}/schedule` · `/people` · `/person` | Miembro | Consulta |
-| `GET /g/{slug}/libre` | Miembro | Tramos con más gente libre, con los nombres de quien puede y de quien no |
+| `GET /g/{slug}/libre` | Miembro | Quién está libre en el intervalo pedido, y si no hay nadie, los mejores tramos de dentro |
 | `GET /g/{slug}/ruleta` | Miembro | Padrón con strikes y participaciones, actividades y el bombo de cada una |
 | `PUT /g/{slug}/person` | Administrador | Corregir el nombre del padrón |
 | `POST /g/{slug}/actividades` · `PUT` · `DELETE /g/{slug}/actividad/{id}` | Administrador | Alta, edición y borrado de actividades |

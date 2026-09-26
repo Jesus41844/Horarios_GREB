@@ -238,20 +238,20 @@ def rename_person(body: RenameIn, access: Access = Depends(group_admin), c: Conn
 @router.get("/libre")
 def buscar_libres(
     dias: str = "0,1,2,3,4",     # 0 = lunes ... 6 = domingo
-    desde: str = "07:00",        # hasta dónde se barre el día (la app no pregunta)
-    hasta: str = "23:00",
-    duracion: int = 60,          # cuánto tiene que durar el hueco, en minutos
+    desde: str = "12:00",        # el intervalo que se ha escrito
+    hasta: str = "13:00",
+    duracion: int = 0,           # 0 = el intervalo entero; si no, un hueco más corto
     paso: int = 15,              # cada cuánto se prueba a empezar el hueco
     access: Access = Depends(group_access), c: Conn = Depends(get_conn),
 ):
     """Los tramos en los que está libre más gente, ordenados de mejor a peor.
 
     Es la pregunta al revés de la rejilla: no quién está ocupado, sino a quién se
-    puede convocar. La franja se barre entera sin que nadie la elija (los
-    parámetros se quedan por si acaso) y lo único que se pregunta es cuánto tiene
-    que durar el hueco y cada cuánto se prueban, así que sirve para una reunión
-    de media hora como para un stand de toda la tarde. Cada tramo vuelve con
-    `disponibles`, los nombres de quien puede, y `ocupados`, los que no.
+    puede convocar. Se escribe un intervalo ("de 12:00 a 13:00") y contesta quién
+    está libre **ese rato entero**; `duracion` solo hace falta para partirlo en
+    huecos más cortos, que es lo que se usa si de ese rato no se libra nadie.
+    Cada tramo vuelve con `disponibles`, los nombres de quien puede, y `ocupados`,
+    los que no.
     """
     try:
         elegidos = sorted({int(x) for x in dias.split(",") if x.strip() != ""})
@@ -261,13 +261,19 @@ def buscar_libres(
         raise HTTPException(400, "Días no válidos.")
     ini, fin = minutos_de(desde), minutos_de(hasta)
     if ini >= fin:
-        raise HTTPException(400, "La franja tiene que empezar antes de terminar.")
+        raise HTTPException(400, "El intervalo tiene que empezar antes de terminar.")
+    if duracion <= 0:
+        duracion = fin - ini          # el intervalo entero, que es lo que se pide
     if not 5 <= duracion <= 24 * 60:
         raise HTTPException(400, "El hueco tiene que durar entre 5 minutos y 24 horas.")
     if not 1 <= paso <= duracion:
         raise HTTPException(400, "Cada cuánto se prueba a empezar el hueco no tiene sentido así.")
-    return free_windows(
-        repo.all_blocks(c, access.group["id"]),
-        [p["name"] for p in repo.list_people(c, access.group["id"])],
-        elegidos, ini, fin, duracion, paso,
-    )
+    bloques = repo.all_blocks(c, access.group["id"])
+    gente = [p["name"] for p in repo.list_people(c, access.group["id"])]
+    huecos = free_windows(bloques, gente, elegidos, ini, fin, duracion, paso)
+    if not huecos and duracion == fin - ini and duracion > 30:
+        # De ese rato no se libra nadie entero. Antes de rendirse se parte en
+        # huecos de media hora: es lo que se viene a buscar también, y cada
+        # tramo sale con sus propias horas, así que no engaña a nadie.
+        huecos = free_windows(bloques, gente, elegidos, ini, fin, 30, 15)
+    return huecos

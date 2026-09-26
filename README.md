@@ -61,8 +61,10 @@ intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 
 **Carga de horarios**
 
 - **PDF**: lectura exacta de la tabla del horario, celda por celda.
-- **Imagen**: reconocimiento óptico (OCR) ejecutado en el navegador. El resultado es una
-  propuesta editable y **nunca se guarda sin revisión**.
+- **Imagen**: reconocimiento óptico (OCR) ejecutado en el navegador. Admite capturas de la tabla
+  de la UTP aunque el OCR monte mal los títulos de los días y pierda algún dos puntos de las horas:
+  las columnas se sacan de dónde está cada `AULA:` y los días se numeran por orden. El resultado
+  es una propuesta editable y **nunca se guarda sin revisión**.
 - **Entrada manual**: alta, edición y borrado de cualquier bloque, sea cual sea su origen.
 - **Horario laboral**: franjas de trabajo que cuentan como ocupación igual que una clase.
 - **Informe de subida** por archivo, con el nombre exacto y el motivo de cada fallo; un archivo
@@ -340,7 +342,10 @@ aislamiento entre agrupaciones).
 
 - **Formato del PDF.** El lector espera la tabla `HORAS × días` de los horarios de la UTP, con
   texto seleccionable. Un PDF escaneado se rechaza con ese motivo en lugar de adivinar.
-- **OCR no exacto.** En la prueba con una captura del horario de ejemplo leyó 17 de 18 bloques.
+- **OCR no exacto.** Es la parte más frágil de la carga: el texto se reconoce bien pero las
+  palabras llegan desordenadas y el OCR confunde letras. En una captura real de la UTP leyó las 26
+  clases presenciales de 29 (las 3 virtuales se descartan solas) con el día, la hora, la materia y
+  el aula correctos, aunque alguna palabra quedó mal (`MATEM.SUPE RING` en vez de `MATEM.SUPER.ING`).
   Por eso la revisión previa es obligatoria y los códigos de aula con formato dudoso se marcan.
 - **Clases virtuales.** Se descartan las que tienen la letra **N** donde iría el primer dígito de
   un aula física: `Salón 2-N01` es virtual, `aula 3-405` no. Los números que rodean a la N no

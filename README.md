@@ -32,7 +32,9 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Vista por día**, con una regla horaria que destaca los huecos libres y marca la hora actual.
 - **Ficha por persona**, con su semana completa, materia, aula y marcas de laboratorio o grupo.
 - **Búsqueda por nombre**, insensible a tildes y mayúsculas.
-- Los bloques consecutivos de una misma persona se unen cuando la pausa es de 10 minutos o menos.
+- Los bloques consecutivos de una misma persona se unen cuando la pausa es de **5 minutos o
+  menos**, los que deja la UTP entre una clase y la siguiente, para que la rejilla salga limpia. A
+  partir de seis minutos el hueco es tiempo libre de verdad y se ve.
 - **Barra de secciones** debajo de la cabecera, con lo que se mira a diario: *Horario*, *Libres*,
   *Más activos* y *Ruleta* (esta última solo para quien administra). La sección abierta se marca.
 - **Ajustes en columna**: un botón con el símbolo de menú abre el panel; allí queda lo que se
@@ -69,9 +71,9 @@ intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 
   editable y **nunca se guarda sin revisión**.
 - **Entrada manual**: alta, edición y borrado de cualquier bloque, sea cual sea su origen.
 - **Horario laboral**: franjas de trabajo que cuentan como ocupación igual que una clase.
-- **La rejilla no inventa clases**: los cinco minutos entre una clase y la siguiente se
-  cuentan como libres, aunque internamente los bloques seguidos se unan para que la pausa no
-  aparezca como un corte.
+- **La rejilla no inventa clases**: unir los bloques seguidos se come el hueco que había entre
+  ellos, así que quién está en cada tramo se decide con los bloques sin unir. Si a alguien no lo
+  ocupa ningún bloque de verdad, ese tramo no se pinta.
 - **Informe de subida** por archivo, con el nombre exacto y el motivo de cada fallo; un archivo
   defectuoso no bloquea al resto.
 - **No se vuelve a subir lo que ya está**: al soltar varios archivos, los de quien ya tiene clases
@@ -201,7 +203,7 @@ db/
   schema.sql         Esquema completo (fuente única)
   migrations.sql     Cambios sobre bases ya creadas
 scripts/manage.py    Administración desde la terminal
-tests/               Pruebas de API y del analizador del OCR
+tests/               Pruebas de API, de la rejilla y del analizador del OCR
 ```
 
 ## Puesta en marcha local
@@ -332,7 +334,7 @@ Todas las rutas cuelgan de `/api`. Salvo las marcadas como públicas, exigen ses
 ## Pruebas
 
 ```bash
-.venv/bin/python -m pytest tests -q         # API: permisos, aislamiento, cargas, correcciones de datos
+.venv/bin/python -m pytest tests -q         # API, rejilla y correcciones de datos
 node tests/ocr.test.mjs                     # analizador del OCR
 ```
 
@@ -340,7 +342,9 @@ Las pruebas de API usan SQLite y cubren, entre otros aspectos: permisos por rol,
 agrupaciones, bloqueo por intentos fallidos, flujo de solicitud y aprobación, edición de bloques,
 exclusión de clases virtuales, correcciones de datos, búsqueda de huecos libres, renombrado con
 arrastre de participaciones y strikes, y la ruleta completa (modos, descanso, pesos, correcciones y
-aislamiento entre agrupaciones).
+aislamiento entre agrupaciones). `tests/test_schedule.py` comprueba los cálculos de la rejilla por
+separado: qué pausas se consideran seguidas (cinco minutos) y que un descanso tragado por la unión
+no llegue a pintarse como una clase.
 
 > **Nota.** Varias pruebas cargan un horario de ejemplo llamado `HorarioClase.pdf` en la raíz del
 > proyecto. El archivo no se versiona, porque `*.pdf` está excluido para no publicar horarios

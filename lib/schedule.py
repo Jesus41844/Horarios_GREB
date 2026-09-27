@@ -1,7 +1,9 @@
 """Une bloques seguidos por persona y calcula quién está ocupado en cada tramo."""
 
-# Pausa máxima entre dos bloques para considerarlos seguidos (los PDF traen 5 min).
-MAX_GAP = 10
+# Pausa máxima entre dos bloques para considerarlos seguidos. La UTP deja cinco
+# minutos entre una clase y la siguiente, así que con cinco minutos la rejilla
+# sale limpia; a partir de seis, el hueco es de verdad y se enseña.
+MAX_GAP = 5
 
 
 def merge_ranges(blocks) -> list[tuple[int, int]]:

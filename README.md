@@ -32,21 +32,22 @@ Diseñada para varias agrupaciones en una misma instalación, con datos aislados
 - **Vista por día**, con una regla horaria que destaca los huecos libres y marca la hora actual.
 - **Ficha por persona**, con su semana completa, materia, aula y marcas de laboratorio o grupo.
 - **Búsqueda por nombre**, insensible a tildes y mayúsculas.
-- Los bloques consecutivos de una misma persona se unen cuando la pausa es de **5 minutos o
-  menos**, los que deja la UTP entre una clase y la siguiente, para que la rejilla salga limpia. A
-  partir de seis minutos el hueco es tiempo libre de verdad y se ve.
+- **Bloques seguidos**: los consecutivos de una misma persona se unen cuando la pausa es de **5
+  minutos o menos**, los que deja la UTP entre una clase y la siguiente, para que la rejilla salga
+  limpia. A partir de seis minutos el hueco es tiempo libre de verdad y se ve.
 - **Barra de secciones** debajo de la cabecera, con lo que se mira a diario: *Horario*, *Libres*,
   *Más activos* y *Ruleta* (esta última solo para quien administra). La sección abierta se marca.
 - **Ajustes en columna**: un botón con el símbolo de menú abre el panel; allí queda lo que se
   configura (Horarios, Miembros, Agrupaciones, Solicitudes y Cuenta) y al pie la cuenta con el botón
   de salir.
-- **Subir PDF** como botón compacto al final de la barra de vistas, junto a *Semana* y *Por día*.
-  Sigue aceptando soltar los archivos encima.
+- **Subir PDF o imagen** con un botón compacto al final de la barra de vistas, junto a *Semana* y
+  *Por día*. Sigue aceptando soltar los archivos encima. Al lado hay una casilla, *Repetir los que
+  ya están*, para desactivar el filtro de los que ya se habían subido.
 
 **Quién está libre**
 
 La pregunta al revés de la rejilla. En lugar de quién está ocupado, la vista **Libres** coge un
-intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 13:00**:
+intervalo escrito —de 12:00 a 13:00 por defecto— y contesta **quién está libre en ese rato**:
 
 - Se elige el intervalo y los días, y nada más. El hueco es el intervalo entero, que es lo que se
   ha preguntado; el parámetro `duracion` existe por si se quiere partir en trozos más cortos.
@@ -85,7 +86,7 @@ intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 
 **Ruleta de actividades**
 
 Para repartir turnos y ponencias sin que siempre salga la misma cara. Cada actividad guarda su propio
-conteo, y son dos clases de actividad:
+conteo, y hay dos modos:
 
 | Modo | Días | Qué mira al sortear |
 |---|---|---|
@@ -107,7 +108,8 @@ conteo, y son dos clases de actividad:
   cerrar, y con `Esc` o con "Listo" se vuelve a los ajustes. El reparto ya está guardado en el
   servidor, así que se registra aunque se cierre la pantalla.
 - **Strikes**: botones rápidos de `+1` y `−1` por persona, con un motivo opcional. El peso en la
-  sorteo es `1 + 1,5 × strikes`, así que quien más tiene, más urge que salga.
+  sorteo es `1 + 1,5 × strikes` (y nunca baja de 1, aunque se resten), así que quien más tiene,
+  más urge que salga.
 - **Descanso**: quien salió en la actividad anterior del mismo modo no entra en la siguiente. Se puede
   desactivar por sorteo (`excluir_activos: false`) cuando de verdad haga falta.
 - Sorteo **sin reemplazo**, de 1 a 6 personas de una vez, con el resultado siempre en el servidor.
@@ -134,8 +136,10 @@ conteo, y son dos clases de actividad:
 | **Administrador** | Subir, editar y borrar | Sin acceso a la gestión de personas |
 | **Solo ver** | Consultar y buscar | — |
 
-- La **cuenta principal** de una agrupación es la del correo inicial: el primer administrador que
-  aprueba el superadmin. No puede ser eliminada ni degradada.
+- Las solicitudes de acceso las aprueba el superadmin, no la cuenta principal.
+- La **cuenta principal** de una agrupación es la del correo inicial: la primera persona que el
+  superadmin aprueba como administradora de ella. No puede ser eliminada ni degradada, y el
+  superadmin puede reasignarla.
 - Quien se añade a una agrupación entra como **solo ver**; ascenderlo a administrador es decisión
   exclusiva de la cuenta principal.
 - Cualquier persona puede solicitar acceso desde la web, pero no ve nada hasta ser aprobada.
@@ -284,7 +288,8 @@ Todo vive en el esquema `horarios`.
 | `strikes` | Strikes por persona y agrupación, con su motivo y fecha |
 | `applied_migrations` | Correcciones de datos ya aplicadas |
 
-Al eliminar una agrupación se eliminan en cascada sus personas, bloques, actividades y strikes.
+Al eliminar una agrupación se van en cascada sus personas, sus bloques, sus actividades, sus
+participaciones, sus strikes, sus membresías y sus solicitudes.
 
 **Identidad social.** `people.name` es la clave de la agenda, pero cambiarla de verdad (por ejemplo,
 «Pérez, Ana» → «Ana Gómez») no puede perder participaciones ni strikes. Por eso ambas tablas
@@ -357,7 +362,8 @@ no llegue a pintarse como una clase.
 - **OCR no exacto.** Es la parte más frágil de la carga: el texto se reconoce bien pero las
   palabras llegan desordenadas y el OCR confunde letras. En una captura real de la UTP leyó las 26
   clases presenciales de 29 (las 3 virtuales se descartan solas) con el día, la hora, la materia y
-  el aula correctos, aunque alguna palabra quedó mal (`MATEM.SUPE RING` en vez de `MATEM.SUPER.ING`).
+  el aula correctos, aunque alguna palabra quedó mal (una abreviatura de materia, partida o con una
+  letra cambiada).
   Aun así marca para revisar los códigos de aula que no encajan en `3-405` (por ejemplo `aula 3`,
   donde el OCR partió el código), que es justo lo que hay que mirar antes de guardar.
 - **Clases virtuales.** Se descartan las que tienen la letra **N** donde iría el primer dígito de

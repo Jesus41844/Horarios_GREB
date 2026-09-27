@@ -16,22 +16,34 @@ def merge_ranges(blocks) -> list[tuple[int, int]]:
     return [(s, e) for s, e in merged]
 
 
-def day_segments(ranges_by_person: dict[str, list[tuple[int, int]]],
-                 work_by_person: dict[str, list[tuple[int, int]]]) -> list[dict]:
+def day_segments(bloques: dict[str, list], trabajo: dict[str, list]) -> list[dict]:
     """Corta el día en cada entrada/salida; une tramos contiguos con los mismos presentes.
+
+    Los límites de cada persona salen de sus bloques unidos, para que la pausa de
+    cinco minutos que la UTP deja entre una clase y la siguiente no se pinte como
+    un corte. Quién está en cada tramo se decide con los bloques sin unir, porque
+    esa unión se traga huecos de hasta `MAX_GAP`: si a alguien no lo ocupa ningún
+    bloque de verdad, lo que se está viendo es su descanso y no una clase. Sin
+    ese cuidado, dos personas con clase en franjas contiguas aparecían ocupadas
+    durante el descanso en cuanto otra cortaba el día justo ahí, y salía un tramo
+    de cinco minutos con gente que en realidad estaba libre.
 
     `working` es quién, en ese tramo, está ahí por trabajo y no por clase: se marca
     aparte porque un horario laboral suele ser menos movible que una clase.
     """
-    points = sorted({p for rs in ranges_by_person.values() for r in rs for p in r})
+    ranges = {n: merge_ranges(bs) for n, bs in bloques.items()}
+    work = {n: merge_ranges(bs) for n, bs in trabajo.items()}
+    points = sorted({p for rs in ranges.values() for r in rs for p in r})
     segs: list[dict] = []
     for a, b in zip(points, points[1:]):
         people, working = [], []
-        for name, rs in ranges_by_person.items():
+        for name, rs in ranges.items():
             if not any(s <= a and b <= e for s, e in rs):
                 continue
+            if not any(r["start"] < b and a < r["end"] for r in bloques[name]):
+                continue            # lo que hay aquí es el descanso que se tragó la unión
             people.append(name)
-            if any(s <= a and b <= e for s, e in work_by_person.get(name, [])):
+            if any(s <= a and b <= e for s, e in work.get(name, [])):
                 working.append(name)
         if not people:
             continue
@@ -55,9 +67,7 @@ def build_week(rows) -> list[dict]:
             work_day[r["day"]].setdefault(r["name"], []).append(r)
     week = []
     for d in range(7):
-        ranges = {n: merge_ranges(bs) for n, bs in per_day[d].items()}
-        work = {n: merge_ranges(bs) for n, bs in work_day[d].items()}
-        week.append({"day": d, "segments": day_segments(ranges, work)})
+        week.append({"day": d, "segments": day_segments(per_day[d], work_day[d])})
     return week
 
 

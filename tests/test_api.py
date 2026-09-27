@@ -149,6 +149,45 @@ def test_horario_agrupa_y_une_bloques(client):
     assert p["days"][0]["blocks"][0]["subject"] == "HER. PROG. AP."
 
 
+def test_el_descanso_entre_clases_no_sale_como_clase(client):
+    """La pausa de cinco minutos de la UTP es tiempo libre de verdad.
+
+    Al unir los bloques seguidos (pausas de 5 min) la rejilla se come ese hueco.
+    Si además otra persona corta el día justo ahí, el descanso se convertía en un
+    tramo de cinco minutos con gente que en realidad estaba libre: era el error
+    de "2 personas tienen clase de 12:45 a 12:50" un jueves.
+    """
+    login(client, "greb@x.com")
+    # Ana y Beto tienen clase en las dos franjas: la unión los junta.
+    bloques = [
+        ("Ana Gómez", "12:00", "12:45"), ("Ana Gómez", "12:50", "13:35"),
+        ("Luis Ramos", "12:00", "12:45"), ("Luis Ramos", "12:50", "13:35"),
+        # Caro sale a las 12:45 y Dan entra a las 12:50: sus cortes son los que
+        # partían el día en ese momento.
+        ("Caro Díaz", "12:00", "12:45"),
+        ("Dan Núñez", "12:50", "13:35"),
+    ]
+    por_persona = {}
+    for nombre, ini, fin in bloques:
+        por_persona.setdefault(nombre, []).append(
+            {"day": 3, "start": ini, "end": fin,
+             "subject": "X", "room": "aula 1-213", "kind": "clase"})
+    for nombre, bs in por_persona.items():
+        client.post("/api/g/greb/blocks", json={
+            "name": nombre, "replace_kind": "clase", "blocks": bs})
+    jueves = client.get("/api/g/greb/schedule").json()[3]["segments"]
+    # Ningún tramo puede caer dentro del descanso.
+    assert not [s for s in jueves if s["end"] - s["start"] <= 5], jueves
+    assert all(s["start"] != 765 or s["end"] != 770 for s in jueves)   # 12:45-12:50
+    # Y quienes sí tienen clase, aparecen en las franjas de verdad.
+    assert jueves[0]["people"] == ["Ana Gómez", "Caro Díaz", "Luis Ramos"]
+    assert jueves[1]["people"] == ["Ana Gómez", "Dan Núñez", "Luis Ramos"]
+    # Los bloques de cada persona se conservan intactos: 12:45-12:50 no existe.
+    ana = client.get("/api/g/greb/person", params={"name": "ana gomez"}).json()["days"][0]
+    assert [(b["start"], b["end"]) for b in ana["blocks"]] == [(720, 765), (770, 815)]
+    client.post("/api/auth/logout")
+
+
 def test_cambio_de_password_cierra_otras_sesiones(client):
     # Dos sesiones distintas del mismo usuario, por ejemplo dos dispositivos.
     otra = TestClient(client.app)

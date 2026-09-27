@@ -69,6 +69,9 @@ intervalo escrito, de 12:00 a 13:00, y contesta **quién está libre de 12:00 a 
   editable y **nunca se guarda sin revisión**.
 - **Entrada manual**: alta, edición y borrado de cualquier bloque, sea cual sea su origen.
 - **Horario laboral**: franjas de trabajo que cuentan como ocupación igual que una clase.
+- **La rejilla no inventa clases**: los cinco minutos entre una clase y la siguiente se
+  cuentan como libres, aunque internamente los bloques seguidos se unan para que la pausa no
+  aparezca como un corte.
 - **Informe de subida** por archivo, con el nombre exacto y el motivo de cada fallo; un archivo
   defectuoso no bloquea al resto.
 - **No se vuelve a subir lo que ya está**: al soltar varios archivos, los de quien ya tiene clases

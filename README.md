@@ -1,5 +1,8 @@
 # Horarios
 
+[![tests](https://github.com/Jesus41844/Horarios_GREB/actions/workflows/tests.yml/badge.svg)](https://github.com/Jesus41844/Horarios_GREB/actions/workflows/tests.yml)
+[![licencia](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
+
 Aplicación web para consultar, en un solo lugar, **quién está ocupado y cuándo** dentro de una
 agrupación estudiantil. Cada miembro aporta su horario de clases (PDF, imagen o captura) y,
 opcionalmente, su horario laboral; la aplicación los consolida y responde a la pregunta que
